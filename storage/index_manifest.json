@@ -1,0 +1,37 @@
+{
+  "chunk_count": 78,
+  "chunks_file": "storage/chunks.jsonl",
+  "chunks_file_sha256": "3b386c26bb416fa3fe077a383f41c58bb90d3b9a8eb411c848652f71bdaeb67d",
+  "collection_name": "greenloop_documents",
+  "created_at": "2026-07-14T12:30:17.397247+00:00",
+  "distance_metric": "cosine",
+  "embedding_dimension": 768,
+  "embedding_model": "sentence-transformers/all-mpnet-base-v2",
+  "normalized_embeddings": true,
+  "package_versions": {
+    "chromadb": "1.1.1",
+    "numpy": "2.5.1",
+    "pydantic": "2.12.5",
+    "python-dotenv": "1.2.2",
+    "sentence-transformers": "5.6.0",
+    "transformers": "5.13.1"
+  },
+  "pdfs": [
+    {
+      "document_id": "HR-HBK-2025-v1.4",
+      "filename": "GreenLoop_Employee_Handbook_2025.pdf",
+      "sha256": "2f546f8ca4cb6fe52324e74704e5eb1c2b6422da1160a4af42f698030ab0888d"
+    },
+    {
+      "document_id": "PRD-GLX1-2025-v2.1",
+      "filename": "GreenLoop_Sorter_X1_Product_Specification.pdf",
+      "sha256": "9500f33ee449e9eb4b44154e7d69fc0b8cd730ea5f47a0b564719dabb514986f"
+    },
+    {
+      "document_id": "FIN-Q3-2025-v1.0",
+      "filename": "GreenLoop_Q3_FY2025_Report.pdf",
+      "sha256": "9b36013fbb500fb158ff007b9722e5301481391da3ce6541eb00a55d65994ac3"
+    }
+  ],
+  "schema_version": 1
+}

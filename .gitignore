@@ -1,0 +1,19 @@
+.env
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+storage/chroma/
+output/*.md
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Operating system files
+.DS_Store
+Thumbs.db
+desktop.ini
