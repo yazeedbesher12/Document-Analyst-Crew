@@ -23,3 +23,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/greenloop_rag_crew"]
+
+[tool.pytest.ini_options]
+addopts = "-m 'not ollama'"
+markers = [
+    "ollama: real local Ollama qwen3:8b integration tests",
+]

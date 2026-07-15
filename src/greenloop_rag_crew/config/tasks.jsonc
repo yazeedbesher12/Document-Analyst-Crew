@@ -1,3 +1,25 @@
 {
-  // Task definitions will be added in a later step.
+  // Task definitions for the final sequential GreenLoop RAG workflow.
+  // Runtime questions are supplied later through crew.kickoff(inputs={...}).
+  // Do not hardcode report filenames here; Python supplies output_file at runtime.
+  "research_task": {
+    "description": "Analyze the user's question: {question}\n\nSplit multi-part questions into focused search topics. Use document_search for every topic and use only retrieved local GreenLoop evidence. Preserve exact numbers, percentages, quarters, comparison conditions, policy constraints, and any explicit limitations. Attach source filename, PDF page, section, and chunk ID to each finding. Clearly state when information is missing, not disclosed, or unsupported by retrieved evidence.",
+    "expected_output": "Structured research notes containing question parts, findings, evidence text, citations, and missing information.",
+    "agent": "document_researcher",
+    "context": [],
+  },
+
+  "fact_check_task": {
+    "description": "Inspect every important claim from the Research Task. Re-query document_search independently for every key claim. Compare each claim with retrieved text and classify it as SUPPORTED, PARTIALLY_SUPPORTED, UNSUPPORTED, or NOT_DISCLOSED. Verify numbers, calculations, comparisons, conditions, and citations. Provide corrected wording when needed.",
+    "expected_output": "A claim-verification table containing claim, classification, explanation, corrected claim if needed, and verified source, page, section, and chunk ID.",
+    "agent": "fact_checker",
+    "context": ["research_task"],
+  },
+
+  "report_task": {
+    "description": "Use only verified context from the Research Task and Fact Check Task to answer the original question: {question}\n\nExclude unsupported claims. Label information that is not disclosed. Produce professional Markdown with this exact structure:\n\n# GreenLoop Document Analysis\n\n## Executive Summary\n\n## Findings\n\n## Limitations and Undisclosed Information\n\n## Citations\n\nEach citation must map a key claim to source filename, PDF page, section, and chunk ID. The Report Writer must not call document_search.",
+    "expected_output": "A professional Markdown report answering the original question, with executive summary, findings, limitations and undisclosed information, and citations.",
+    "agent": "report_writer",
+    "context": ["research_task", "fact_check_task"],
+  },
 }
