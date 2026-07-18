@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from threading import Lock
 
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field, PrivateAttr, field_validator
@@ -80,6 +81,8 @@ class DocumentSearchTool(BaseTool):
     args_schema: type[BaseModel] = DocumentSearchInput
 
     _retriever: HybridRetriever | None = PrivateAttr(default=None)
+    _initialization_lock: Lock = PrivateAttr(default_factory=Lock)
+    _search_lock: Lock = PrivateAttr(default_factory=Lock)
 
     def _run(
         self,
@@ -93,11 +96,15 @@ class DocumentSearchTool(BaseTool):
             validated = DocumentSearchInput.model_validate(
                 {"query": query, "top_k": top_k, "document_id": document_id}
             )
-            results = self._get_retriever().search(
-                validated.query,
-                top_k=validated.top_k,
-                document_id=validated.document_id,
-            )
+            retriever = self._get_retriever()
+            # Chroma's local persistent client is not safe to initialize/query from
+            # concurrent tool calls on this runtime. Keep one client and serialize it.
+            with self._search_lock:
+                results = retriever.search(
+                    validated.query,
+                    top_k=validated.top_k,
+                    document_id=validated.document_id,
+                )
             if not results:
                 return _json_dumps(
                     {
@@ -139,7 +146,9 @@ class DocumentSearchTool(BaseTool):
 
     def _get_retriever(self) -> HybridRetriever:
         if self._retriever is None:
-            self._retriever = HybridRetriever()
+            with self._initialization_lock:
+                if self._retriever is None:
+                    self._retriever = HybridRetriever()
         return self._retriever
 
 

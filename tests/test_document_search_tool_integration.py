@@ -1,5 +1,6 @@
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,28 @@ def test_laboratory_accuracy_search_returns_page_12_evidence():
 
     result = _page_result(payload, 12)
     assert "93.2%" in result["text"]
+
+
+def test_concurrent_document_searches_both_succeed():
+    tool = DocumentSearchTool()
+    searches = [
+        ("remote work policy", "HR-HBK-2025-v1.4"),
+        ("laboratory accuracy", "PRD-GLX1-2025-v2.1"),
+    ]
+
+    def run_search(search):
+        query, document_id = search
+        return json.loads(tool.run(query=query, document_id=document_id, top_k=5))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        remote_payload, accuracy_payload = executor.map(run_search, searches)
+
+    assert remote_payload["status"] == "ok"
+    assert _page_result(remote_payload, 6)["chunk_id"] == "HR-HBK-2025-v1.4_p06_c01"
+    assert accuracy_payload["status"] == "ok"
+    accuracy_result = _page_result(accuracy_payload, 12)
+    assert accuracy_result["chunk_id"] == "PRD-GLX1-2025-v2.1_p12_c01"
+    assert "93.2%" in accuracy_result["text"]
 
 
 def test_q3_vs_q2_field_accuracy_search_returns_page_12_evidence():

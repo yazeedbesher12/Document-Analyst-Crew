@@ -44,6 +44,20 @@ def test_valid_jsonc_loads():
     assert config.report_task.context == ["research_task", "fact_check_task"]
 
 
+def test_default_tasks_keep_retrieval_errors_distinct_and_prioritize_corrections():
+    config = load_tasks_config()
+
+    assert "RETRIEVAL_ERROR must never become NOT_DISCLOSED" in config.fact_check_task.description
+    assert "retrieval succeeded but relevant information is absent" in config.fact_check_task.description
+    assert "corrected wording" in config.fact_check_task.expected_output
+    assert "source filename, page, section, chunk_id" in config.fact_check_task.expected_output
+    assert "Fact Check Task claim audit as the authority" in config.report_task.description
+    assert "Answer only the original question" in config.report_task.description
+    assert "under 250 words" in config.report_task.description
+    assert "omit every adjacent" in config.report_task.description
+    assert "Include all required citations before ending" in config.report_task.description
+
+
 def test_valid_jsonc_with_comments_and_trailing_commas_loads(tmp_path):
     config = load_tasks_config(_write_config(tmp_path, VALID_TASKS_CONFIG))
 

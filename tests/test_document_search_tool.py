@@ -1,4 +1,7 @@
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from crewai.tools import BaseTool
@@ -61,6 +64,30 @@ class ExplodingRetriever(FakeHybridRetriever):
         raise RuntimeError("secret stack details should stay out of tool output")
 
 
+class SlowInitializingRetriever(FakeHybridRetriever):
+    active_searches = 0
+    max_active_searches = 0
+    state_lock = threading.Lock()
+
+    def __init__(self):
+        time.sleep(0.05)
+        super().__init__()
+
+    def search(self, query, top_k=5, document_id=None):
+        with self.state_lock:
+            type(self).active_searches += 1
+            type(self).max_active_searches = max(
+                type(self).max_active_searches,
+                type(self).active_searches,
+            )
+        try:
+            time.sleep(0.05)
+            return super().search(query, top_k=top_k, document_id=document_id)
+        finally:
+            with self.state_lock:
+                type(self).active_searches -= 1
+
+
 def test_tool_identity_and_schema():
     tool = DocumentSearchTool()
 
@@ -121,6 +148,29 @@ def test_retriever_initializes_lazily_and_is_reused(monkeypatch):
         ("remote work policy", 5, None),
         ("dashboard SLA", 3, "HR-HBK-2025-v1.4"),
     ]
+
+
+def test_concurrent_calls_initialize_one_retriever(monkeypatch):
+    FakeHybridRetriever.instances = 0
+    SlowInitializingRetriever.active_searches = 0
+    SlowInitializingRetriever.max_active_searches = 0
+    monkeypatch.setattr(
+        "greenloop_rag_crew.tools.document_search.HybridRetriever",
+        SlowInitializingRetriever,
+    )
+    tool = DocumentSearchTool()
+    start = threading.Barrier(2)
+
+    def search(query):
+        start.wait()
+        return json.loads(tool.run(query=query, top_k=1))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        payloads = list(executor.map(search, ["remote work policy", "laboratory accuracy"]))
+
+    assert FakeHybridRetriever.instances == 1
+    assert SlowInitializingRetriever.max_active_searches == 1
+    assert [payload["status"] for payload in payloads] == ["ok", "ok"]
 
 
 def test_successful_output_is_valid_evidence_json(monkeypatch):
@@ -186,6 +236,7 @@ def test_internal_exception_does_not_expose_stack_trace(monkeypatch):
 
     assert payload["status"] == "error"
     assert payload["error_type"] == "retrieval_error"
+    assert "not_disclosed" not in json.dumps(payload).lower()
     assert "Traceback" not in json.dumps(payload)
     assert "secret stack details" not in json.dumps(payload)
 
