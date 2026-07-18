@@ -6,6 +6,9 @@ __pycache__/
 .pytest_cache/
 storage/chroma/
 output/*.md
+!output/report_01_remote_work_and_revenue.md
+!output/report_02_accuracy_comparison.md
+!output/report_03_sla_and_revenue_loss.md
 
 # IDE files
 .idea/
