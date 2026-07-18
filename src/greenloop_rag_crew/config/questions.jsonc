@@ -1,0 +1,33 @@
+{
+  // Final report questions for the GreenLoop RAG workflow.
+  // The runner supplies these as crew.kickoff(inputs={"question": ...}) later.
+  "questions": [
+    {
+      "id": "remote_work_and_revenue",
+      "question": "What is GreenLoop's remote-work policy for software and AI employees, and how did Q3 FY2025 revenue compare with Q2 FY2025 revenue?",
+      "output_file": "output/report_01_remote_work_and_revenue.md",
+      "required_document_ids": [
+        "HR-HBK-2025-v1.4",
+        "FIN-Q3-2025-v1.0",
+      ],
+    },
+    {
+      "id": "accuracy_comparison",
+      "question": "Compare the Sorter X1 laboratory macro accuracy with its Q3 field macro accuracy. What was the percentage-point gap, and how did Q3 field accuracy compare with Q2?",
+      "output_file": "output/report_02_accuracy_comparison.md",
+      "required_document_ids": [
+        "PRD-GLX1-2025-v2.1",
+        "FIN-Q3-2025-v1.0",
+      ],
+    },
+    {
+      "id": "sla_and_revenue_loss",
+      "question": "Compare the Sorter X1 dashboard availability SLA target with the actual Q3 dashboard uptime, and state whether the exact revenue lost because of multi-item errors is disclosed.",
+      "output_file": "output/report_03_sla_and_revenue_loss.md",
+      "required_document_ids": [
+        "PRD-GLX1-2025-v2.1",
+        "FIN-Q3-2025-v1.0",
+      ],
+    },
+  ],
+}

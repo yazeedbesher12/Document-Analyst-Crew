@@ -10,7 +10,9 @@ from dotenv import load_dotenv
 
 DEFAULT_MODEL = "ollama/qwen3:8b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
-DEFAULT_TIMEOUT_SECONDS = 180
+# qwen3:8b generates at about 2 tokens/second on the target local machine.
+# Allow a complete response instead of triggering LiteLLM's automatic retries.
+DEFAULT_TIMEOUT_SECONDS = 600
 
 
 def create_llm() -> LLM:

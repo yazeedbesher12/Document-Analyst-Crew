@@ -8,12 +8,20 @@ from typing import Any
 import json5
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from greenloop_rag_crew.rag.document_registry import DOCUMENT_REGISTRY
+
 EXPECTED_AGENT_KEYS = frozenset(
     {"document_researcher", "fact_checker", "report_writer"}
 )
 EXPECTED_TASK_KEYS = frozenset({"research_task", "fact_check_task", "report_task"})
 VALID_AGENT_KEYS = EXPECTED_AGENT_KEYS
 DOCUMENT_SEARCH_TOOL = "custom:document_search"
+EXPECTED_QUESTION_IDS = (
+    "remote_work_and_revenue",
+    "accuracy_comparison",
+    "sla_and_revenue_loss",
+)
+VALID_DOCUMENT_IDS = frozenset(metadata.document_id for metadata in DOCUMENT_REGISTRY)
 
 
 class ConfigError(ValueError):
@@ -92,6 +100,33 @@ class TasksConfig(BaseModel):
     report_task: TaskConfig
 
 
+class QuestionConfig(BaseModel):
+    """Validated runtime question definition."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(..., min_length=1)
+    question: str = Field(..., min_length=1)
+    output_file: str = Field(..., min_length=1)
+    required_document_ids: list[str]
+
+    @field_validator("id", "question", "output_file")
+    @classmethod
+    def reject_blank_text(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("must not be blank")
+        return stripped
+
+
+class QuestionsConfig(BaseModel):
+    """Validated final report questions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    questions: list[QuestionConfig]
+
+
 def load_agents_config(config_path: str | Path | None = None) -> AgentsConfig:
     """Load and strictly validate the agents JSONC configuration."""
 
@@ -158,12 +193,35 @@ def load_tasks_config(config_path: str | Path | None = None) -> TasksConfig:
     return config
 
 
+def load_questions_config(config_path: str | Path | None = None) -> QuestionsConfig:
+    """Load and strictly validate the three final questions JSONC config."""
+
+    path = Path(config_path) if config_path is not None else _default_questions_config_path()
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            raw_config: Any = json5.load(file)
+    except Exception as exc:
+        raise ConfigError(f"Failed to parse questions config {path}: {exc}") from exc
+
+    try:
+        config = QuestionsConfig.model_validate(raw_config)
+    except Exception as exc:
+        raise ConfigError(f"Invalid questions config {path}: {exc}") from exc
+
+    _validate_question_rules(config)
+    return config
+
+
 def _default_agents_config_path() -> Path:
     return Path(__file__).resolve().parent / "config" / "agents.jsonc"
 
 
 def _default_tasks_config_path() -> Path:
     return Path(__file__).resolve().parent / "config" / "tasks.jsonc"
+
+
+def _default_questions_config_path() -> Path:
+    return Path(__file__).resolve().parent / "config" / "questions.jsonc"
 
 
 def _validate_agent_tool_rules(config: AgentsConfig) -> None:
@@ -226,3 +284,47 @@ def _validate_task_rules(config: TasksConfig) -> None:
         raise ConfigError("research_task description must include {question}.")
     if "{question}" not in config.report_task.description:
         raise ConfigError("report_task description must include {question}.")
+
+
+def _validate_question_rules(config: QuestionsConfig) -> None:
+    questions = config.questions
+    if len(questions) != 3:
+        raise ConfigError("questions.jsonc must contain exactly three questions.")
+
+    ids = [question.id for question in questions]
+    if len(set(ids)) != len(ids):
+        raise ConfigError("question IDs must be unique.")
+    if tuple(ids) != EXPECTED_QUESTION_IDS:
+        raise ConfigError(
+            "questions.jsonc must define question IDs in this order: "
+            + ", ".join(EXPECTED_QUESTION_IDS)
+        )
+
+    output_paths = [question.output_file for question in questions]
+    if len(set(output_paths)) != len(output_paths):
+        raise ConfigError("question output paths must be unique.")
+
+    for question in questions:
+        if not question.question.strip():
+            raise ConfigError(f"{question.id}: question must not be blank.")
+        _validate_output_file(question.id, question.output_file)
+        if not question.required_document_ids:
+            raise ConfigError(f"{question.id}: required_document_ids must not be empty.")
+        unknown_ids = sorted(set(question.required_document_ids) - VALID_DOCUMENT_IDS)
+        if unknown_ids:
+            raise ConfigError(
+                f"{question.id}: unknown required document ID(s): "
+                + ", ".join(unknown_ids)
+            )
+
+
+def _validate_output_file(question_id: str, output_file: str) -> None:
+    path = Path(output_file)
+    if path.is_absolute():
+        raise ConfigError(f"{question_id}: output_file must be relative.")
+    if any(part == ".." for part in path.parts):
+        raise ConfigError(f"{question_id}: output_file must not contain '..'.")
+    if not path.parts or path.parts[0] != "output":
+        raise ConfigError(f"{question_id}: output_file must be under output/.")
+    if path.suffix.lower() != ".md":
+        raise ConfigError(f"{question_id}: output_file must be a Markdown .md path.")
