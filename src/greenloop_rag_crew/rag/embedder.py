@@ -10,6 +10,8 @@ import numpy as np
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
+from greenloop_rag_crew.runtime_paths import prepare_model_cache_dirs
+
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 DEFAULT_EMBEDDING_DEVICE = "cpu"
 DEFAULT_EMBEDDING_BATCH_SIZE = 16
@@ -44,10 +46,17 @@ class GreenLoopEmbedder:
     @property
     def model(self) -> SentenceTransformer:
         if self._model is None:
+            prepare_model_cache_dirs()
+            model_options = {
+                "device": self.device,
+                "trust_remote_code": False,
+            }
+            cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
+            if cache_folder is not None:
+                model_options["cache_folder"] = cache_folder
             self._model = SentenceTransformer(
                 self.model_name,
-                device=self.device,
-                trust_remote_code=False,
+                **model_options,
             )
         return self._model
 

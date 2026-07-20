@@ -14,6 +14,7 @@ from greenloop_rag_crew.rag.chroma_store import (
 )
 from greenloop_rag_crew.rag.embedder import GreenLoopEmbedder
 from greenloop_rag_crew.rag.schemas import DenseSearchResult
+from greenloop_rag_crew.runtime_paths import chroma_persist_dir, chunks_file as configured_chunks_file
 
 
 class DenseRetriever:
@@ -21,14 +22,14 @@ class DenseRetriever:
 
     def __init__(
         self,
-        persist_dir: str | Path = DEFAULT_CHROMA_PERSIST_DIRECTORY,
+        persist_dir: str | Path | None = None,
         collection_name: str = DEFAULT_CHROMA_COLLECTION,
-        chunks_file: str | Path = DEFAULT_CHUNKS_FILE,
+        chunks_file: str | Path | None = None,
         embedder: GreenLoopEmbedder | None = None,
     ) -> None:
-        self.persist_dir = Path(persist_dir)
+        self.persist_dir = Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
         self.collection_name = collection_name
-        self.chunks_file = Path(chunks_file)
+        self.chunks_file = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
         self.embedder = embedder or GreenLoopEmbedder()
         self.store = ChromaStore(persist_dir=self.persist_dir, collection_name=collection_name)
 
@@ -105,7 +106,7 @@ def main() -> None:
     parser.add_argument("query")
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--document-id", default=None)
-    parser.add_argument("--persist-dir", default=DEFAULT_CHROMA_PERSIST_DIRECTORY)
+    parser.add_argument("--persist-dir", default=None)
     parser.add_argument("--collection", default=DEFAULT_CHROMA_COLLECTION)
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args()

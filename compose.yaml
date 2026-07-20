@@ -1,0 +1,29 @@
+services:
+  app:
+    build:
+      context: .
+    image: greenloop-document-analyst:local
+    ports:
+      - "8501:8501"
+    environment:
+      LLM_PROVIDER: ollama
+      OLLAMA_MODEL: qwen3:8b
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      KNOWLEDGE_DIR: /app/knowledge
+      CHROMA_PERSIST_DIR: /app/storage/chroma
+      OUTPUT_DIR: /app/output
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./output:/app/output
+      - ./storage/chroma:/app/storage/chroma
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3

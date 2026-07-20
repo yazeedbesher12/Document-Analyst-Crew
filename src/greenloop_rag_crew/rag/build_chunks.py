@@ -11,15 +11,17 @@ from greenloop_rag_crew.rag.chunker import create_chunks
 from greenloop_rag_crew.rag.document_registry import DOCUMENT_REGISTRY, validate_knowledge_pack
 from greenloop_rag_crew.rag.pdf_loader import extract_pages
 from greenloop_rag_crew.rag.schemas import DocumentChunk
+from greenloop_rag_crew.runtime_paths import chunks_file, knowledge_dir as configured_knowledge_dir
 
 
 def build_chunks(
-    knowledge_dir: str | Path = "knowledge", output: str | Path = "storage/chunks.jsonl"
+    knowledge_dir: str | Path | None = None,
+    output: str | Path | None = None,
 ) -> list[DocumentChunk]:
     """Validate PDFs, extract pages, create chunks, and write JSON Lines."""
 
-    knowledge_path = Path(knowledge_dir)
-    output_path = Path(output)
+    knowledge_path = Path(knowledge_dir) if knowledge_dir is not None else configured_knowledge_dir()
+    output_path = Path(output) if output is not None else chunks_file()
 
     registry = validate_knowledge_pack(knowledge_path)
     pages = extract_pages(knowledge_path)
@@ -40,8 +42,8 @@ def build_chunks(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--knowledge-dir", default="knowledge")
-    parser.add_argument("--output", default="storage/chunks.jsonl")
+    parser.add_argument("--knowledge-dir", default=None)
+    parser.add_argument("--output", default=None)
     args = parser.parse_args()
 
     build_chunks(knowledge_dir=args.knowledge_dir, output=args.output)

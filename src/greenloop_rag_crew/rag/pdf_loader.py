@@ -13,6 +13,7 @@ from greenloop_rag_crew.rag.document_registry import (
     validate_knowledge_pack,
 )
 from greenloop_rag_crew.rag.schemas import ExtractedPage
+from greenloop_rag_crew.runtime_paths import knowledge_dir as configured_knowledge_dir
 
 _DECORATIVE_LINE_RE = re.compile(r"^[\s._\-=\u2014\u2013]+$")
 _PAGE_NUMBER_RE = re.compile(r"^(?:page\s*)?\d{1,3}$", re.IGNORECASE)
@@ -30,10 +31,10 @@ class _LineCandidate:
     span_count: int
 
 
-def extract_pages(knowledge_dir: str | Path = "knowledge") -> list[ExtractedPage]:
+def extract_pages(knowledge_dir: str | Path | None = None) -> list[ExtractedPage]:
     """Validate and extract all pages in registry order."""
 
-    knowledge_path = Path(knowledge_dir)
+    knowledge_path = Path(knowledge_dir) if knowledge_dir is not None else configured_knowledge_dir()
     registry = validate_knowledge_pack(knowledge_path)
     pages: list[ExtractedPage] = []
 

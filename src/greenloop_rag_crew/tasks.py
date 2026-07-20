@@ -9,6 +9,7 @@ from crewai import Task
 
 from greenloop_rag_crew.agents import AgentBundle
 from greenloop_rag_crew.config_loader import TaskConfig, load_tasks_config
+from greenloop_rag_crew.runtime_paths import resolve_configured_output_path
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,7 @@ def _prepare_output_path(output_path: str | Path) -> Path:
     if "\x00" in raw:
         raise ValueError("output_path must not contain null bytes.")
 
-    path = Path(raw)
+    path = resolve_configured_output_path(raw)
     if any(part == ".." for part in path.parts):
         raise ValueError("output_path must not contain parent-directory traversal.")
     if path.exists() and path.is_dir():

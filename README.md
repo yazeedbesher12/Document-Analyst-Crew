@@ -1,6 +1,6 @@
 # GreenLoop RAG Document Analyst Crew
 
-This project answers GreenLoop document questions with a local CrewAI workflow. It searches only the three PDFs in `knowledge/`; it does not use web search or a cloud-model fallback.
+This project answers GreenLoop document questions with a CrewAI workflow. It searches only the three PDFs in `knowledge/`; it does not use web search. Ollama is the local default, with an optional Azure runtime provider.
 
 ## Architecture
 
@@ -40,6 +40,8 @@ uv sync
 ```
 
 Optional local settings are documented in `.env.example`. Do not commit a real `.env` file.
+
+`LLM_PROVIDER=ollama` is the default and uses `OLLAMA_MODEL=qwen3:8b`. To use Azure at runtime, set `LLM_PROVIDER=azure` plus `AZURE_LLM_MODEL`, `AZURE_API_KEY`, and `AZURE_ENDPOINT`; `AZURE_API_VERSION` is optional. These settings are validated before a crew starts, and API keys are never logged.
 
 ## Build the Local Index
 
@@ -89,6 +91,30 @@ uv run python manual_run.py
 ```
 
 Each manual question receives a timestamped, unique Markdown file in `output/`. These ad-hoc reports stay ignored by Git.
+
+## Streamlit Web Interface
+
+Run the local web interface with:
+
+```powershell
+uv run streamlit run streamlit_app.py
+```
+
+Each submitted question creates a fresh CrewAI crew and a unique Markdown report in `output/`.
+
+## Docker Preparation
+
+The Docker image packages the three PDFs from `knowledge/` with the application source and JSONC configuration. It deliberately does not include the host Chroma database: the container creates its own chunks and Chroma index from those packaged PDFs at startup. The `sentence-transformers/all-mpnet-base-v2` cache is prepared during the image build so startup does not need to download it again.
+
+Generated reports and model/index caches are container-local unless you mount volumes for `output/` and `storage/`. Ollama and `qwen3:8b` are not included in the image; run Ollama separately and provide its reachable URL at runtime, for example `OLLAMA_BASE_URL=http://host.docker.internal:11434` on supported Docker Desktop installations.
+
+The image runs the existing Streamlit entrypoint on port `8501`. Copy `docker.env.example` to a local untracked environment file before supplying any runtime secret. A local Compose run uses the host Ollama service without packaging it:
+
+```powershell
+docker compose up --build
+```
+
+For Azure, pass `AZURE_API_KEY`, `AZURE_ENDPOINT`, `AZURE_LLM_MODEL`, and optional `AZURE_API_VERSION` only at runtime. No API key or `.env` file is copied into an image layer.
 
 ## Validate Deliverables
 

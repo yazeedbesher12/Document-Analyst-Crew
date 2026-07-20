@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from typing import Any
 
 from greenloop_rag_crew.config_loader import ConfigError, QuestionConfig, load_questions_config
 from greenloop_rag_crew.crew import create_crew
+from greenloop_rag_crew.runtime_paths import resolve_configured_output_path
 
 
 @dataclass(frozen=True)
@@ -40,9 +42,15 @@ def run_question(
     """Create a fresh crew for one configured question and optionally run it."""
 
     question = _find_question(question_id)
-    _ensure_output_available(question.output_file, overwrite=overwrite)
-    bundle = create_crew(llm=llm, output_path=question.output_file)
-    result = _to_run_result(question=question, bundle=bundle, dry_run=dry_run)
+    output_path = resolve_configured_output_path(question.output_file)
+    _ensure_output_available(output_path, overwrite=overwrite)
+    bundle = create_crew(llm=llm, output_path=output_path)
+    result = _to_run_result(
+        question=question,
+        bundle=bundle,
+        output_path=output_path,
+        dry_run=dry_run,
+    )
     if dry_run:
         return result
 
@@ -73,7 +81,7 @@ def _find_question(question_id: str) -> QuestionConfig:
     raise ConfigError(f"Unknown question_id {question_id!r}.")
 
 
-def _ensure_output_available(output_file: str, overwrite: bool) -> None:
+def _ensure_output_available(output_file: str | Path, overwrite: bool) -> None:
     path = Path(output_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists() and not overwrite:
@@ -82,11 +90,18 @@ def _ensure_output_available(output_file: str, overwrite: bool) -> None:
         )
 
 
-def _to_run_result(question: QuestionConfig, bundle, dry_run: bool) -> RunResult:
+def _to_run_result(
+    question: QuestionConfig,
+    bundle,
+    output_path: Path,
+    dry_run: bool,
+) -> RunResult:
     return RunResult(
         question_id=question.id,
         question=question.question,
-        output_path=question.output_file,
+        output_path=(
+            str(output_path) if os.getenv("OUTPUT_DIR", "").strip() else question.output_file
+        ),
         agent_order=[agent.role for agent in bundle.crew.agents],
         task_order=["research_task", "fact_check_task", "report_task"],
         process_type=bundle.crew.process.value,

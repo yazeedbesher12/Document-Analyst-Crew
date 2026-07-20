@@ -43,6 +43,8 @@ def main() -> None:
         raise
 
     if args.json:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
         print(json.dumps([result.model_dump() for result in results], ensure_ascii=False))
         return
 

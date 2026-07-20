@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +10,7 @@ from chromadb.api.models.Collection import Collection
 from dotenv import load_dotenv
 
 from greenloop_rag_crew.rag.schemas import DocumentChunk
+from greenloop_rag_crew.runtime_paths import chroma_persist_dir
 
 DEFAULT_CHROMA_PERSIST_DIRECTORY = "storage/chroma"
 DEFAULT_CHROMA_COLLECTION = "greenloop_documents"
@@ -25,11 +25,10 @@ class ChromaStore:
         collection_name: str | None = None,
     ) -> None:
         load_dotenv()
-        self.persist_dir = Path(
-            persist_dir
-            or os.getenv("CHROMA_PERSIST_DIRECTORY")
-            or DEFAULT_CHROMA_PERSIST_DIRECTORY
+        self.persist_dir = (
+            Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
         )
+        self.persist_dir.mkdir(parents=True, exist_ok=True)
         self.collection_name = (
             collection_name or os.getenv("CHROMA_COLLECTION") or DEFAULT_CHROMA_COLLECTION
         )

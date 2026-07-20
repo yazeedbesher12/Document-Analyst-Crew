@@ -23,6 +23,7 @@ from greenloop_rag_crew.rag.schemas import (
     DenseSearchResult,
     HybridSearchResult,
 )
+from greenloop_rag_crew.runtime_paths import chroma_persist_dir, chunks_file as configured_chunks_file
 
 DEFAULT_DENSE_WEIGHT = 0.50
 DEFAULT_BM25_WEIGHT = 0.50
@@ -35,15 +36,15 @@ class HybridRetriever:
 
     def __init__(
         self,
-        chunks_file: str | Path = DEFAULT_CHUNKS_FILE,
-        persist_dir: str | Path = DEFAULT_CHROMA_PERSIST_DIRECTORY,
+        chunks_file: str | Path | None = None,
+        persist_dir: str | Path | None = None,
         collection_name: str = DEFAULT_CHROMA_COLLECTION,
         dense_retriever: DenseRetriever | None = None,
         bm25_retriever: BM25Retriever | None = None,
         embedder: GreenLoopEmbedder | None = None,
     ) -> None:
-        self.chunks_file = Path(chunks_file)
-        self.persist_dir = Path(persist_dir)
+        self.chunks_file = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
+        self.persist_dir = Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
         self.collection_name = collection_name
         self.embedder = embedder or GreenLoopEmbedder()
         self.dense_retriever = dense_retriever or DenseRetriever(

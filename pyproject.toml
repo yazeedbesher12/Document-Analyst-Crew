@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "GreenLoop RAG Document Analyst Crew project setup."
 requires-python = ">=3.10,<3.14"
 dependencies = [
-    "crewai[tools]",
+    "crewai[tools,azure-ai-inference]",
+    "streamlit",
     "pymupdf",
     "sentence-transformers",
     "transformers",

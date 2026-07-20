@@ -28,9 +28,15 @@ from greenloop_rag_crew.rag.embedder import (
     _env_int,
 )
 from greenloop_rag_crew.rag.schemas import DocumentChunk
+from greenloop_rag_crew.runtime_paths import (
+    chroma_persist_dir,
+    chunks_file as configured_chunks_file,
+    knowledge_dir as configured_knowledge_dir,
+    manifest_file,
+)
 
 INDEX_SCHEMA_VERSION = 1
-MANIFEST_PATH = Path("storage/index_manifest.json")
+MANIFEST_PATH = manifest_file()
 DEFAULT_CHUNKS_FILE = "storage/chunks.jsonl"
 NORMALIZED_EMBEDDINGS = True
 DISTANCE_METRIC = "cosine"
@@ -84,15 +90,18 @@ def load_chunks(chunks_file: str | Path) -> list[DocumentChunk]:
 
 
 def build_index(
-    chunks_file: str | Path = DEFAULT_CHUNKS_FILE,
-    persist_dir: str | Path = DEFAULT_CHROMA_PERSIST_DIRECTORY,
+    chunks_file: str | Path | None = None,
+    persist_dir: str | Path | None = None,
     collection_name: str = DEFAULT_CHROMA_COLLECTION,
     batch_size: int | None = None,
     rebuild: bool = False,
+    knowledge_dir: str | Path | None = None,
 ) -> str:
     """Build or skip a current dense index and return an action string."""
 
-    chunks_path = Path(chunks_file)
+    chunks_path = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
+    persist_path = Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
+    knowledge_path = Path(knowledge_dir) if knowledge_dir is not None else configured_knowledge_dir()
     batch_size = batch_size or _env_int("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE)
     embedding_model = _configured_embedding_model()
 
@@ -102,8 +111,9 @@ def build_index(
         chunks_file=chunks_path,
         collection_name=collection_name,
         embedding_model=embedding_model,
+        knowledge_dir=knowledge_path,
     )
-    store = ChromaStore(persist_dir=persist_dir, collection_name=collection_name)
+    store = ChromaStore(persist_dir=persist_path, collection_name=collection_name)
 
     if not rebuild and is_index_current(manifest_candidate, store):
         print(
@@ -156,7 +166,7 @@ def build_index(
     )
     print(
         f"Indexed {len(chunks)} chunks into {collection_name} "
-        f"at {Path(persist_dir)} using {manifest_candidate['embedding_model']}."
+        f"at {persist_path} using {manifest_candidate['embedding_model']}."
     )
     return "rebuilt"
 
@@ -166,11 +176,13 @@ def build_manifest(
     chunks_file: str | Path,
     collection_name: str,
     embedding_model: str | None = None,
+    knowledge_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     """Build the comparable manifest payload. created_at is added on success."""
 
     chunks_path = Path(chunks_file)
-    validate_knowledge_pack("knowledge")
+    knowledge_path = Path(knowledge_dir) if knowledge_dir is not None else configured_knowledge_dir()
+    validate_knowledge_pack(knowledge_path)
 
     return {
         "schema_version": INDEX_SCHEMA_VERSION,
@@ -187,7 +199,7 @@ def build_manifest(
             {
                 "filename": metadata.filename,
                 "document_id": metadata.document_id,
-                "sha256": sha256_file(Path("knowledge") / metadata.filename),
+                "sha256": sha256_file(knowledge_path / metadata.filename),
             }
             for metadata in DOCUMENT_REGISTRY
         ],
@@ -244,8 +256,9 @@ def sha256_file(path: str | Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--chunks", default=DEFAULT_CHUNKS_FILE)
-    parser.add_argument("--persist-dir", default=DEFAULT_CHROMA_PERSIST_DIRECTORY)
+    parser.add_argument("--chunks", default=None)
+    parser.add_argument("--persist-dir", default=None)
+    parser.add_argument("--knowledge-dir", default=None)
     parser.add_argument("--collection", default=DEFAULT_CHROMA_COLLECTION)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--rebuild", action="store_true")
@@ -257,6 +270,7 @@ def main() -> None:
         collection_name=args.collection,
         batch_size=args.batch_size,
         rebuild=args.rebuild,
+        knowledge_dir=args.knowledge_dir,
     )
 
 

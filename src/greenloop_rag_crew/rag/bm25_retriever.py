@@ -9,13 +9,14 @@ from rank_bm25 import BM25Okapi
 from greenloop_rag_crew.rag.build_index import DEFAULT_CHUNKS_FILE, load_chunks
 from greenloop_rag_crew.rag.schemas import BM25SearchResult, DocumentChunk
 from greenloop_rag_crew.rag.tokenizer import tokenize
+from greenloop_rag_crew.runtime_paths import chunks_file as configured_chunks_file
 
 
 class BM25Retriever:
     """Small deterministic BM25 retriever backed by storage/chunks.jsonl."""
 
-    def __init__(self, chunks_file: str | Path = DEFAULT_CHUNKS_FILE) -> None:
-        self.chunks_file = Path(chunks_file)
+    def __init__(self, chunks_file: str | Path | None = None) -> None:
+        self.chunks_file = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
         self.chunks = load_chunks(self.chunks_file)
         self._indexed_text = [_searchable_text(chunk) for chunk in self.chunks]
         self._tokenized_corpus = [tokenize(text) for text in self._indexed_text]

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from greenloop_rag_crew.runtime_paths import resolve_configured_output_path
+
 
 REQUIRED_HEADINGS = (
     "# GreenLoop Document Analysis",
@@ -67,7 +69,7 @@ def validate_reports() -> dict[str, list[str]]:
 
 
 def _validate_report(requirement: ReportRequirement) -> list[str]:
-    path = requirement.path
+    path = resolve_configured_output_path(requirement.path)
     if not path.exists():
         return ["file is missing"]
 
