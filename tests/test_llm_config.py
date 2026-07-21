@@ -72,3 +72,25 @@ def test_create_llm_uses_local_ollama_settings(monkeypatch):
     assert created["max_tokens"] == 900
     assert created["timeout"] == llm_module.DEFAULT_TIMEOUT_SECONDS
     assert created["additional_params"] == {"extra_body": {"think": False}}
+
+
+def test_latency_controls_are_read_from_the_environment(monkeypatch):
+    created = {}
+
+    class FakeLLM:
+        def __init__(self, **kwargs):
+            created.update(kwargs)
+
+    monkeypatch.setattr(llm_module, "LLM", FakeLLM)
+    monkeypatch.setenv("LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_MODEL", "qwen3:8b")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setenv("LLM_TEMPERATURE", "0.1")
+    monkeypatch.setenv("LLM_MAX_TOKENS", "512")
+    monkeypatch.setenv("OLLAMA_THINK", "false")
+
+    llm_module.create_llm()
+
+    assert created["temperature"] == 0.1
+    assert created["max_tokens"] == 512
+    assert created["additional_params"] == {"extra_body": {"think": False}}

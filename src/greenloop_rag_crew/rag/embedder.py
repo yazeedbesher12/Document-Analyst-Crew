@@ -7,6 +7,7 @@ import os
 from collections.abc import Sequence
 from functools import lru_cache
 import logging
+from threading import Lock
 from time import perf_counter
 
 import numpy as np
@@ -43,6 +44,7 @@ class GreenLoopEmbedder:
             "EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE
         )
         self._model: SentenceTransformer | None = None
+        self._model_lock = Lock()
         self.model_load_seconds: float | None = None
 
     @property
@@ -52,25 +54,28 @@ class GreenLoopEmbedder:
     @property
     def model(self) -> SentenceTransformer:
         if self._model is None:
-            started = perf_counter()
-            prepare_model_cache_dirs()
-            model_options = {
-                "device": self.device,
-                "trust_remote_code": False,
-            }
-            cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
-            if cache_folder is not None:
-                model_options["cache_folder"] = cache_folder
-            self._model = SentenceTransformer(
-                self.model_name,
-                **model_options,
-            )
-            self.model_load_seconds = perf_counter() - started
-            LOGGER.info(
-                "timing event=embedding_model_loaded elapsed_seconds=%.3f model=%s",
-                self.model_load_seconds,
-                self.model_name,
-            )
+            with self._model_lock:
+                if self._model is None:
+                    started = perf_counter()
+                    prepare_model_cache_dirs()
+                    model_options = {
+                        "device": self.device,
+                        "trust_remote_code": False,
+                    }
+                    cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
+                    if cache_folder is not None:
+                        model_options["cache_folder"] = cache_folder
+                    self._model = SentenceTransformer(
+                        self.model_name,
+                        **model_options,
+                    )
+                    self.model_load_seconds = perf_counter() - started
+                    LOGGER.info(
+                        "timing event=embedding_model_loaded elapsed_seconds=%.3f model=%s",
+                        self.model_load_seconds,
+                        self.model_name,
+                    )
+        assert self._model is not None
         return self._model
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:

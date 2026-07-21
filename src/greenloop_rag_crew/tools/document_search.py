@@ -91,7 +91,7 @@ class DocumentSearchTool(BaseTool):
     def _run(
         self,
         query: str,
-        top_k: int = 5,
+        top_k: int | None = None,
         document_id: str | None = None,
     ) -> str:
         """Return evidence chunks as a JSON string for CrewAI."""

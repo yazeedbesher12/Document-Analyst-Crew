@@ -202,14 +202,25 @@ def test_successful_output_is_valid_evidence_json(monkeypatch):
     assert list(payload["results"][0].keys()).index("rank") == 0
 
 
-def test_rag_top_k_environment_default_is_respected(monkeypatch):
+@pytest.mark.parametrize(
+    ("configured_top_k", "expected_top_k"),
+    [(None, 6), ("4", 4)],
+)
+def test_rag_top_k_environment_default_is_respected(
+    monkeypatch,
+    configured_top_k,
+    expected_top_k,
+):
     service = _patch_retrieval_service(monkeypatch)
-    monkeypatch.setenv("RAG_TOP_K", "6")
+    if configured_top_k is None:
+        monkeypatch.delenv("RAG_TOP_K", raising=False)
+    else:
+        monkeypatch.setenv("RAG_TOP_K", configured_top_k)
 
     payload = json.loads(DocumentSearchTool().run(query="remote work policy"))
 
     assert payload["status"] == "ok"
-    assert service.retriever.calls == [("remote work policy", 6, None)]
+    assert service.retriever.calls == [("remote work policy", expected_top_k, None)]
 
 
 def test_no_results_output(monkeypatch):

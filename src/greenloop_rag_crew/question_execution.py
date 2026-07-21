@@ -137,7 +137,7 @@ def execute_question(
     _notify_progress(
         progress_callback,
         "Completed",
-        timing.durations.get("total_request_execution", 0.0),
+        timing.durations.get("report_writer_execution", 0.0),
     )
     retrieval_calls_after, retrieval_seconds_after = retrieval_service.metrics_snapshot()
     timing.durations["total_retrieval_execution"] = (

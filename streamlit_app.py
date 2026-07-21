@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import logging
-from time import perf_counter
+from dataclasses import dataclass
+from typing import Any
 
 import streamlit as st
 
@@ -21,6 +22,41 @@ from greenloop_rag_crew.question_execution import (
 from greenloop_rag_crew.rag.retrieval_service import RetrievalService, get_retrieval_service
 
 LOGGER = logging.getLogger(__name__)
+INITIAL_STAGE = "Preparing document index"
+
+
+@dataclass
+class _StageProgress:
+    """Render public workflow stages without exposing request content."""
+
+    status: Any
+    current_stage: str = INITIAL_STAGE
+
+    def advance(self, next_stage: str, elapsed_seconds: float) -> None:
+        """Record the completed public stage before showing the next one."""
+
+        if next_stage == self.current_stage:
+            return
+        elapsed = max(0.0, elapsed_seconds)
+        self.status.write(f"{self.current_stage}: {elapsed:.1f}s")
+        self.current_stage = next_stage
+        if next_stage != "Completed":
+            self.status.update(label=next_stage, state="running")
+
+    def complete(self, total_elapsed_seconds: float) -> None:
+        """Finish the public status after all workflow stages have been shown."""
+
+        if self.current_stage != "Completed":
+            self.advance("Completed", 0.0)
+        self.status.update(
+            label=f"Completed ({max(0.0, total_elapsed_seconds):.1f}s)",
+            state="complete",
+        )
+
+    def fail(self, label: str) -> None:
+        """Mark the public status as failed without rendering internal details."""
+
+        self.status.update(label=label, state="error")
 
 
 @st.cache_resource(show_spinner=False)
@@ -50,19 +86,17 @@ def main() -> None:
         if not question.strip():
             st.error("Please enter a question before analyzing documents.")
         else:
-            status = st.status("Preparing document index", expanded=True)
-            stage_started = perf_counter()
+            status = st.status(INITIAL_STAGE, expanded=True)
+            progress = _StageProgress(status)
 
             def show_stage(stage: str, elapsed_seconds: float) -> None:
-                elapsed = elapsed_seconds or (perf_counter() - stage_started)
-                state = "complete" if stage == "Completed" else "running"
-                status.update(label=f"{stage} ({elapsed:.1f}s)", state=state)
+                progress.advance(stage, elapsed_seconds)
 
             try:
                 retrieval_service = _streamlit_retrieval_service()
             except Exception:
                 LOGGER.exception("Streamlit retrieval initialization failure.")
-                status.update(label="Document index preparation failed", state="error")
+                progress.fail("Document index preparation failed")
                 st.error("Local document retrieval is unavailable. Check the local index and try again.")
                 return
 
@@ -74,36 +108,42 @@ def main() -> None:
                 )
             except QuestionValidationError as exc:
                 LOGGER.exception("Streamlit received an invalid question.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except OllamaConnectionError as exc:
                 LOGGER.exception("Streamlit Ollama connection failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except OllamaModelMissingError as exc:
                 LOGGER.exception("Streamlit Ollama model preflight failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except ProviderConfigurationError as exc:
                 LOGGER.exception("Streamlit LLM provider configuration failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except RetrievalError as exc:
                 LOGGER.exception("Streamlit retrieval failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except CrewExecutionError as exc:
                 LOGGER.exception("Streamlit CrewAI execution failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except UnexpectedExecutionError as exc:
                 LOGGER.exception("Streamlit unexpected execution failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except QuestionExecutionError as exc:
                 LOGGER.exception("Streamlit document analysis failure.")
+                progress.fail("Document analysis failed")
                 st.error(str(exc))
             except Exception:
                 LOGGER.exception("Unexpected Streamlit application failure.")
+                progress.fail("Document analysis failed")
                 st.error("An unexpected error occurred. Please try again.")
             else:
-                status.update(
-                    label=f"Completed ({result.timings.get('total_request_execution', 0.0):.1f}s)",
-                    state="complete",
-                )
+                progress.complete(result.timings.get("total_request_execution", 0.0))
                 st.markdown(result.report_markdown)
                 st.download_button(
                     "Download Markdown report",

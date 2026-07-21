@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from threading import Lock
 
 from greenloop_rag_crew.rag.build_index import DEFAULT_CHUNKS_FILE, build_manifest, load_chunks, read_manifest
 from greenloop_rag_crew.rag.chroma_store import (
@@ -32,6 +33,8 @@ class DenseRetriever:
         self.chunks_file = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
         self.embedder = embedder or get_cached_embedder()
         self.store = ChromaStore(persist_dir=self.persist_dir, collection_name=collection_name)
+        self._index_verified = False
+        self._verification_lock = Lock()
 
     def search(
         self,
@@ -39,10 +42,20 @@ class DenseRetriever:
         top_k: int = 5,
         document_id: str | None = None,
     ) -> list[DenseSearchResult]:
-        self._verify_index()
+        self._ensure_index_verified()
         query_embedding = self.embedder.embed_query(query)
         raw = self.store.query(query_embedding, top_k=top_k, document_id=document_id)
         return _format_results(raw)
+
+    def _ensure_index_verified(self) -> None:
+        """Verify durable index state once for this reusable retriever instance."""
+
+        if self._index_verified:
+            return
+        with self._verification_lock:
+            if not self._index_verified:
+                self._verify_index()
+                self._index_verified = True
 
     def _verify_index(self) -> None:
         manifest = read_manifest()
