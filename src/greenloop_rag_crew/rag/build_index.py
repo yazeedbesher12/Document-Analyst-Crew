@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timezone
 from importlib import metadata as package_metadata
 from pathlib import Path
 from typing import Any
+from time import perf_counter
 
 from dotenv import load_dotenv
 
@@ -18,7 +20,12 @@ from greenloop_rag_crew.rag.chroma_store import (
     DEFAULT_CHROMA_PERSIST_DIRECTORY,
     ChromaStore,
 )
-from greenloop_rag_crew.rag.chunker import MAX_EMBEDDING_TOKENS
+from greenloop_rag_crew.rag.chunker import (
+    MAX_CONTENT_TOKENS,
+    MAX_EMBEDDING_TOKENS,
+    OVERLAP_TOKENS,
+    TOKENIZER_MODEL,
+)
 from greenloop_rag_crew.rag.document_registry import DOCUMENT_REGISTRY, validate_knowledge_pack
 from greenloop_rag_crew.rag.embedder import (
     DEFAULT_EMBEDDING_BATCH_SIZE,
@@ -35,7 +42,9 @@ from greenloop_rag_crew.runtime_paths import (
     manifest_file,
 )
 
-INDEX_SCHEMA_VERSION = 1
+LOGGER = logging.getLogger(__name__)
+
+INDEX_SCHEMA_VERSION = 2
 MANIFEST_PATH = manifest_file()
 DEFAULT_CHUNKS_FILE = "storage/chunks.jsonl"
 NORMALIZED_EMBEDDINGS = True
@@ -105,7 +114,13 @@ def build_index(
     batch_size = batch_size or _env_int("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE)
     embedding_model = _configured_embedding_model()
 
+    load_started = perf_counter()
     chunks = load_chunks(chunks_path)
+    LOGGER.info(
+        "timing event=chunk_file_loaded elapsed_seconds=%.3f chunks=%s",
+        perf_counter() - load_started,
+        len(chunks),
+    )
     manifest_candidate = build_manifest(
         chunks=chunks,
         chunks_file=chunks_path,
@@ -125,6 +140,7 @@ def build_index(
     if MANIFEST_PATH.exists():
         MANIFEST_PATH.unlink()
 
+    rebuild_started = perf_counter()
     collection = store.recreate_collection()
     if collection.count() != 0:
         raise RuntimeError(f"Collection {collection_name!r} was not empty after recreation.")
@@ -168,6 +184,11 @@ def build_index(
         f"Indexed {len(chunks)} chunks into {collection_name} "
         f"at {persist_path} using {manifest_candidate['embedding_model']}."
     )
+    LOGGER.info(
+        "timing event=chroma_rebuilt elapsed_seconds=%.3f chunks=%s",
+        perf_counter() - rebuild_started,
+        len(chunks),
+    )
     return "rebuilt"
 
 
@@ -192,6 +213,7 @@ def build_manifest(
         "embedding_dimension": EXPECTED_EMBEDDING_DIMENSION,
         "normalized_embeddings": NORMALIZED_EMBEDDINGS,
         "distance_metric": DISTANCE_METRIC,
+        "chunking": chunking_configuration(),
         "chunk_count": len(chunks),
         "chunks_file": _relative_posix(chunks_path),
         "chunks_file_sha256": sha256_file(chunks_path),
@@ -290,6 +312,17 @@ def _relative_posix(path: Path) -> str:
 def _configured_embedding_model() -> str:
     load_dotenv()
     return os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
+
+
+def chunking_configuration() -> dict[str, int | str]:
+    """Return the chunk settings that define stable citation-bearing chunks."""
+
+    return {
+        "tokenizer_model": TOKENIZER_MODEL,
+        "max_embedding_tokens": MAX_EMBEDDING_TOKENS,
+        "max_content_tokens": MAX_CONTENT_TOKENS,
+        "overlap_tokens": OVERLAP_TOKENS,
+    }
 
 
 if __name__ == "__main__":

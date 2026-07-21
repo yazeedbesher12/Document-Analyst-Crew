@@ -32,6 +32,11 @@ class FakeCrew:
         return FakeKickoffResult()
 
 
+class FakeRetrievalService:
+    def metrics_snapshot(self):
+        return 0, 0.0
+
+
 @dataclass
 class FakeBundle:
     crew: FakeCrew
@@ -40,6 +45,11 @@ class FakeBundle:
 @pytest.fixture(autouse=True)
 def skip_real_ollama_preflight(monkeypatch):
     monkeypatch.setattr(execution_module, "check_llm_preflight", lambda: None)
+    monkeypatch.setattr(
+        execution_module,
+        "get_retrieval_service",
+        lambda: FakeRetrievalService(),
+    )
 
 
 def test_empty_question_is_rejected():

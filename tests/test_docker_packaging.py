@@ -17,6 +17,13 @@ def test_dockerfile_uses_locked_dependencies_and_streamlit_entrypoint():
     assert ".env" in dockerfile
 
 
+def test_project_selects_cpu_torch_wheels_for_linux_containers():
+    project = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert "https://download.pytorch.org/whl/cpu" in project
+    assert "sys_platform == 'linux'" in project
+
+
 def test_dockerignore_excludes_runtime_state_but_keeps_required_inputs():
     dockerignore = (PROJECT_ROOT / ".dockerignore").read_text(encoding="utf-8")
 

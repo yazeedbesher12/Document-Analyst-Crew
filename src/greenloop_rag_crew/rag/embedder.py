@@ -5,12 +5,17 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Sequence
+from functools import lru_cache
+import logging
+from time import perf_counter
 
 import numpy as np
 from dotenv import load_dotenv
 from sentence_transformers import SentenceTransformer
 
 from greenloop_rag_crew.runtime_paths import prepare_model_cache_dirs
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-mpnet-base-v2"
 DEFAULT_EMBEDDING_DEVICE = "cpu"
@@ -38,6 +43,7 @@ class GreenLoopEmbedder:
             "EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE
         )
         self._model: SentenceTransformer | None = None
+        self.model_load_seconds: float | None = None
 
     @property
     def model_loaded(self) -> bool:
@@ -46,6 +52,7 @@ class GreenLoopEmbedder:
     @property
     def model(self) -> SentenceTransformer:
         if self._model is None:
+            started = perf_counter()
             prepare_model_cache_dirs()
             model_options = {
                 "device": self.device,
@@ -57,6 +64,12 @@ class GreenLoopEmbedder:
             self._model = SentenceTransformer(
                 self.model_name,
                 **model_options,
+            )
+            self.model_load_seconds = perf_counter() - started
+            LOGGER.info(
+                "timing event=embedding_model_loaded elapsed_seconds=%.3f model=%s",
+                self.model_load_seconds,
+                self.model_name,
             )
         return self._model
 
@@ -126,3 +139,26 @@ def _env_int(name: str, default: int) -> int:
     if value <= 0:
         raise ValueError(f"{name} must be greater than zero.")
     return value
+
+
+@lru_cache(maxsize=4)
+def _cached_embedder(model_name: str, device: str, batch_size: int) -> GreenLoopEmbedder:
+    """Return one reusable lazy embedder for a resolved runtime configuration."""
+
+    return GreenLoopEmbedder(model_name=model_name, device=device, batch_size=batch_size)
+
+
+def get_cached_embedder() -> GreenLoopEmbedder:
+    """Return the process-level embedding service without loading weights yet."""
+
+    load_dotenv()
+    model_name = os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
+    device = os.getenv("EMBEDDING_DEVICE") or DEFAULT_EMBEDDING_DEVICE
+    batch_size = _env_int("EMBEDDING_BATCH_SIZE", DEFAULT_EMBEDDING_BATCH_SIZE)
+    return _cached_embedder(model_name, device, batch_size)
+
+
+def clear_cached_embedders() -> None:
+    """Clear cached embedder wrappers for tests or explicit runtime reconfiguration."""
+
+    _cached_embedder.cache_clear()

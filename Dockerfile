@@ -13,7 +13,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     OUTPUT_DIR=/app/output \
     HF_HOME=/app/storage/cache/huggingface \
     SENTENCE_TRANSFORMERS_HOME=/app/storage/cache/sentence_transformers \
-    EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
+    EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2 \
+    OLLAMA_THINK=false \
+    LLM_TEMPERATURE=0.1 \
+    LLM_MAX_TOKENS=900 \
+    RAG_TOP_K=6
 
 WORKDIR /app
 

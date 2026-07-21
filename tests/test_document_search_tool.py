@@ -88,6 +88,23 @@ class SlowInitializingRetriever(FakeHybridRetriever):
                 type(self).active_searches -= 1
 
 
+class FakeRetrievalService:
+    def __init__(self, retriever_type=FakeHybridRetriever):
+        self.retriever = retriever_type()
+
+    def search(self, query, top_k, document_id=None):
+        return self.retriever.search(query, top_k=top_k, document_id=document_id)
+
+
+def _patch_retrieval_service(monkeypatch, retriever_type=FakeHybridRetriever):
+    service = FakeRetrievalService(retriever_type)
+    monkeypatch.setattr(
+        "greenloop_rag_crew.tools.document_search.get_retrieval_service",
+        lambda: service,
+    )
+    return service
+
+
 def test_tool_identity_and_schema():
     tool = DocumentSearchTool()
 
@@ -125,10 +142,7 @@ def test_known_document_ids_are_accepted(document_id):
 
 def test_retriever_initializes_lazily_and_is_reused(monkeypatch):
     FakeHybridRetriever.instances = 0
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        FakeHybridRetriever,
-    )
+    service = _patch_retrieval_service(monkeypatch)
     tool = DocumentSearchTool()
 
     assert tool._retriever is None
@@ -144,7 +158,7 @@ def test_retriever_initializes_lazily_and_is_reused(monkeypatch):
     assert FakeHybridRetriever.instances == 1
     assert first["status"] == "ok"
     assert second["status"] == "ok"
-    assert tool._retriever.calls == [
+    assert service.retriever.calls == [
         ("remote work policy", 5, None),
         ("dashboard SLA", 3, "HR-HBK-2025-v1.4"),
     ]
@@ -154,10 +168,7 @@ def test_concurrent_calls_initialize_one_retriever(monkeypatch):
     FakeHybridRetriever.instances = 0
     SlowInitializingRetriever.active_searches = 0
     SlowInitializingRetriever.max_active_searches = 0
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        SlowInitializingRetriever,
-    )
+    _patch_retrieval_service(monkeypatch, SlowInitializingRetriever)
     tool = DocumentSearchTool()
     start = threading.Barrier(2)
 
@@ -174,10 +185,7 @@ def test_concurrent_calls_initialize_one_retriever(monkeypatch):
 
 
 def test_successful_output_is_valid_evidence_json(monkeypatch):
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        FakeHybridRetriever,
-    )
+    _patch_retrieval_service(monkeypatch)
     payload = json.loads(DocumentSearchTool().run(query="remote work policy", top_k=5))
 
     assert payload["status"] == "ok"
@@ -194,11 +202,18 @@ def test_successful_output_is_valid_evidence_json(monkeypatch):
     assert list(payload["results"][0].keys()).index("rank") == 0
 
 
+def test_rag_top_k_environment_default_is_respected(monkeypatch):
+    service = _patch_retrieval_service(monkeypatch)
+    monkeypatch.setenv("RAG_TOP_K", "6")
+
+    payload = json.loads(DocumentSearchTool().run(query="remote work policy"))
+
+    assert payload["status"] == "ok"
+    assert service.retriever.calls == [("remote work policy", 6, None)]
+
+
 def test_no_results_output(monkeypatch):
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        EmptyHybridRetriever,
-    )
+    _patch_retrieval_service(monkeypatch, EmptyHybridRetriever)
     payload = json.loads(DocumentSearchTool().run(query="zzzz unmatched query", top_k=5))
 
     assert payload["status"] == "no_results"
@@ -214,10 +229,7 @@ def test_no_results_output(monkeypatch):
     ],
 )
 def test_index_errors_are_actionable(monkeypatch, retriever, expected_type):
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        retriever,
-    )
+    _patch_retrieval_service(monkeypatch, retriever)
     payload = json.loads(DocumentSearchTool().run(query="remote work policy", top_k=5))
 
     assert payload["status"] == "error"
@@ -228,10 +240,7 @@ def test_index_errors_are_actionable(monkeypatch, retriever, expected_type):
 
 
 def test_internal_exception_does_not_expose_stack_trace(monkeypatch):
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        ExplodingRetriever,
-    )
+    _patch_retrieval_service(monkeypatch, ExplodingRetriever)
     payload = json.loads(DocumentSearchTool().run(query="remote work policy", top_k=5))
 
     assert payload["status"] == "error"
@@ -242,10 +251,7 @@ def test_internal_exception_does_not_expose_stack_trace(monkeypatch):
 
 
 def test_tool_does_not_call_unrelated_services_when_retriever_is_mocked(monkeypatch):
-    monkeypatch.setattr(
-        "greenloop_rag_crew.tools.document_search.HybridRetriever",
-        FakeHybridRetriever,
-    )
+    _patch_retrieval_service(monkeypatch)
     monkeypatch.setattr(
         "greenloop_rag_crew.rag.build_index.build_index",
         lambda *args, **kwargs: pytest.fail("tool must not rebuild index"),

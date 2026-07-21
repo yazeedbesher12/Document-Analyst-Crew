@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import logging
+from time import perf_counter
 from typing import Any
 
 import chromadb
@@ -11,6 +13,8 @@ from dotenv import load_dotenv
 
 from greenloop_rag_crew.rag.schemas import DocumentChunk
 from greenloop_rag_crew.runtime_paths import chroma_persist_dir
+
+LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CHROMA_PERSIST_DIRECTORY = "storage/chroma"
 DEFAULT_CHROMA_COLLECTION = "greenloop_documents"
@@ -24,6 +28,7 @@ class ChromaStore:
         persist_dir: str | Path | None = None,
         collection_name: str | None = None,
     ) -> None:
+        started = perf_counter()
         load_dotenv()
         self.persist_dir = (
             Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
@@ -33,6 +38,11 @@ class ChromaStore:
             collection_name or os.getenv("CHROMA_COLLECTION") or DEFAULT_CHROMA_COLLECTION
         )
         self.client = chromadb.PersistentClient(path=str(self.persist_dir))
+        LOGGER.info(
+            "timing event=chroma_initialized elapsed_seconds=%.3f collection=%s",
+            perf_counter() - started,
+            self.collection_name,
+        )
 
     def get_or_create_collection(self) -> Collection:
         """Create or return a cosine HNSW collection without Chroma embeddings."""

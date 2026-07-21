@@ -67,7 +67,8 @@ def test_create_llm_uses_local_ollama_settings(monkeypatch):
 
     assert created["model"] == "ollama/qwen3:8b"
     assert created["base_url"] == "http://localhost:11434"
-    assert created["temperature"] == 0.6
+    assert created["temperature"] == 0.1
     assert created["top_p"] == 0.95
-    assert created["max_tokens"] <= 1000
+    assert created["max_tokens"] == 900
     assert created["timeout"] == llm_module.DEFAULT_TIMEOUT_SECONDS
+    assert created["additional_params"] == {"extra_body": {"think": False}}

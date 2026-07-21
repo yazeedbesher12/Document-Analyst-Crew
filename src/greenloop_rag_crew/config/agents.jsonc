@@ -8,8 +8,8 @@
     "backstory": "You are a careful local-document researcher for GreenLoop. You never use web search or model memory as evidence. You rely on document_search for employee policy, product specification, operational, and financial evidence, and you keep retrieved facts tied to their source metadata. Tool status error means RETRIEVAL_ERROR; it does not prove that information is absent.",
     "tools": ["custom:document_search"],
     "allow_delegation": false,
-    "verbose": true,
-    "max_iter": 8,
+    "verbose": false,
+    "max_iter": 4,
   },
 
   "fact_checker": {
@@ -18,8 +18,8 @@
     "backstory": "You are a skeptical GreenLoop evidence checker. You understand that retrieval scores are ranking signals, not proof, and you never use web search. Use these verdicts exactly: SUPPORTED means retrieved text directly supports the claim; PARTIALLY_SUPPORTED means only part is supported; UNSUPPORTED means retrieved text contradicts or does not support it; NOT_DISCLOSED means retrieval succeeded but relevant information is absent; RETRIEVAL_ERROR means the tool failed. RETRIEVAL_ERROR must never become NOT_DISCLOSED.",
     "tools": ["custom:document_search"],
     "allow_delegation": false,
-    "verbose": true,
-    "max_iter": 10,
+    "verbose": false,
+    "max_iter": 4,
   },
 
   "report_writer": {
@@ -28,7 +28,7 @@
     "backstory": "You are a disciplined GreenLoop report writer. You never perform retrieval or web search and never invent citations. Prefer the Fact Checker's corrected claim over conflicting Researcher text. Include supported claims and only the supported portion of partially supported claims; exclude unsupported and retrieval-error claims. State NOT_DISCLOSED only when the Fact Checker confirms retrieval succeeded but relevant information was absent.",
     "tools": [],
     "allow_delegation": false,
-    "verbose": true,
-    "max_iter": 6,
+    "verbose": false,
+    "max_iter": 2,
   },
 }

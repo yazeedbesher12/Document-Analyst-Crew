@@ -13,6 +13,8 @@ DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_OLLAMA_MODEL = "qwen3:8b"
 DEFAULT_MODEL = f"ollama/{DEFAULT_OLLAMA_MODEL}"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_LLM_TEMPERATURE = 0.1
+DEFAULT_LLM_MAX_TOKENS = 900
 # qwen3:8b generates at about 2 tokens/second on the target local machine.
 # Allow a complete response instead of triggering automatic retries.
 DEFAULT_TIMEOUT_SECONDS = 600
@@ -47,14 +49,19 @@ def create_llm() -> LLM:
     settings = get_provider_settings()
     shared_options = {
         "model": settings.model,
-        "temperature": 0.6,
+        "temperature": _configured_temperature(),
         "top_p": 0.95,
         "timeout": DEFAULT_TIMEOUT_SECONDS,
-        "max_tokens": 1000,
+        "max_tokens": _configured_max_tokens(),
     }
 
     if settings.provider == "ollama":
-        return LLM(base_url=settings.base_url, **shared_options)
+        additional_params = {"extra_body": {"think": False}} if not ollama_thinking_enabled() else {}
+        return LLM(
+            base_url=settings.base_url,
+            additional_params=additional_params,
+            **shared_options,
+        )
 
     # CrewAI's native Azure provider accepts endpoint/api_version directly.
     return LLM(
@@ -160,3 +167,47 @@ def _required_env(name: str, error_type: type[LLMConfigurationError]) -> str:
     if not value:
         raise error_type(f"{name} is required when LLM_PROVIDER=azure.")
     return value
+
+
+def ollama_thinking_enabled() -> bool:
+    """Return whether Ollama reasoning mode is explicitly enabled at runtime."""
+
+    return _env_bool("OLLAMA_THINK", default=False)
+
+
+def _configured_temperature() -> float:
+    value = _env_float("LLM_TEMPERATURE", DEFAULT_LLM_TEMPERATURE)
+    if not 0 <= value <= 2:
+        raise LLMConfigurationError("LLM_TEMPERATURE must be between 0 and 2.")
+    return value
+
+
+def _configured_max_tokens() -> int:
+    raw_value = os.getenv("LLM_MAX_TOKENS", str(DEFAULT_LLM_MAX_TOKENS)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise LLMConfigurationError("LLM_MAX_TOKENS must be a positive integer.") from exc
+    if not 256 <= value <= 2000:
+        raise LLMConfigurationError("LLM_MAX_TOKENS must be between 256 and 2000.")
+    return value
+
+
+def _env_float(name: str, default: float) -> float:
+    raw_value = os.getenv(name, str(default)).strip()
+    try:
+        return float(raw_value)
+    except ValueError as exc:
+        raise LLMConfigurationError(f"{name} must be a number.") from exc
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw_value = os.getenv(name)
+    if raw_value is None or not raw_value.strip():
+        return default
+    normalized = raw_value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise LLMConfigurationError(f"{name} must be true or false.")

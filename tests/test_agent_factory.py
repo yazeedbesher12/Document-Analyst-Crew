@@ -44,6 +44,14 @@ def test_all_agents_share_supplied_llm():
     assert bundle.report_writer.llm is llm
 
 
+def test_agents_use_conservative_explicit_iteration_limits():
+    bundle = create_agents(llm=_safe_llm())
+
+    assert bundle.document_researcher.max_iter == 4
+    assert bundle.fact_checker.max_iter == 4
+    assert bundle.report_writer.max_iter == 2
+
+
 def test_tool_assignment_uses_one_shared_document_search_tool():
     bundle = create_agents(llm=_safe_llm())
 

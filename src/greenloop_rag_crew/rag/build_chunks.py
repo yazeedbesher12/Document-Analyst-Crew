@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from collections import Counter
 from pathlib import Path
+from time import perf_counter
 
 from greenloop_rag_crew.rag.chunker import create_chunks
 from greenloop_rag_crew.rag.document_registry import DOCUMENT_REGISTRY, validate_knowledge_pack
 from greenloop_rag_crew.rag.pdf_loader import extract_pages
 from greenloop_rag_crew.rag.schemas import DocumentChunk
 from greenloop_rag_crew.runtime_paths import chunks_file, knowledge_dir as configured_knowledge_dir
+
+LOGGER = logging.getLogger(__name__)
 
 
 def build_chunks(
@@ -23,9 +27,26 @@ def build_chunks(
     knowledge_path = Path(knowledge_dir) if knowledge_dir is not None else configured_knowledge_dir()
     output_path = Path(output) if output is not None else chunks_file()
 
+    validation_started = perf_counter()
     registry = validate_knowledge_pack(knowledge_path)
+    LOGGER.info(
+        "timing event=knowledge_pack_validated elapsed_seconds=%.3f",
+        perf_counter() - validation_started,
+    )
+    extraction_started = perf_counter()
     pages = extract_pages(knowledge_path)
+    LOGGER.info(
+        "timing event=pdf_extraction elapsed_seconds=%.3f pages=%s",
+        perf_counter() - extraction_started,
+        len(pages),
+    )
+    chunking_started = perf_counter()
     chunks = create_chunks(pages)
+    LOGGER.info(
+        "timing event=chunk_creation elapsed_seconds=%.3f chunks=%s",
+        perf_counter() - chunking_started,
+        len(chunks),
+    )
 
     registry_order = {metadata.document_id: index for index, metadata in enumerate(registry)}
     chunks.sort(key=lambda chunk: (registry_order[chunk.document_id], chunk.page, chunk.chunk_id))

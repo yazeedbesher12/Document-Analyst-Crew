@@ -43,6 +43,8 @@ Optional local settings are documented in `.env.example`. Do not commit a real `
 
 `LLM_PROVIDER=ollama` is the default and uses `OLLAMA_MODEL=qwen3:8b`. To use Azure at runtime, set `LLM_PROVIDER=azure` plus `AZURE_LLM_MODEL`, `AZURE_API_KEY`, and `AZURE_ENDPOINT`; `AZURE_API_VERSION` is optional. These settings are validated before a crew starts, and API keys are never logged.
 
+For concise factual retrieval, the default runtime settings are `OLLAMA_THINK=false`, `LLM_TEMPERATURE=0.1`, `LLM_MAX_TOKENS=900`, and `RAG_TOP_K=6`. CrewAI 1.15.2 routes Ollama through its OpenAI-compatible client; the application uses that client's supported `extra_body` request field to send `think: false`. The setting was verified with a real local qwen3:8b request.
+
 ## Build the Local Index
 
 The checked-in storage artifacts already describe the current knowledge pack. Rebuild only after intentionally changing a PDF or the chunking/index configuration:
@@ -105,6 +107,8 @@ Each submitted question creates a fresh CrewAI crew and a unique Markdown report
 ## Docker Preparation
 
 The Docker image packages the three PDFs from `knowledge/` with the application source and JSONC configuration. It deliberately does not include the host Chroma database: the container creates its own chunks and Chroma index from those packaged PDFs at startup. The `sentence-transformers/all-mpnet-base-v2` cache is prepared during the image build so startup does not need to download it again.
+
+For Linux images, `uv` resolves `torch` from the official CPU-only PyTorch index. This avoids CUDA/NVIDIA runtime packages while retaining the local Windows dependency path.
 
 Generated reports and model/index caches are container-local unless you mount volumes for `output/` and `storage/`. Ollama and `qwen3:8b` are not included in the image; run Ollama separately and provide its reachable URL at runtime, for example `OLLAMA_BASE_URL=http://host.docker.internal:11434` on supported Docker Desktop installations.
 

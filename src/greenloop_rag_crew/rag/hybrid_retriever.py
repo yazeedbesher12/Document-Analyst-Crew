@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Lock
 
 from greenloop_rag_crew.rag.bm25_retriever import BM25Retriever
 from greenloop_rag_crew.rag.build_index import (
@@ -17,7 +18,7 @@ from greenloop_rag_crew.rag.chroma_store import (
     ChromaStore,
 )
 from greenloop_rag_crew.rag.dense_search import DenseRetriever
-from greenloop_rag_crew.rag.embedder import GreenLoopEmbedder
+from greenloop_rag_crew.rag.embedder import GreenLoopEmbedder, get_cached_embedder
 from greenloop_rag_crew.rag.schemas import (
     BM25SearchResult,
     DenseSearchResult,
@@ -46,7 +47,7 @@ class HybridRetriever:
         self.chunks_file = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
         self.persist_dir = Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
         self.collection_name = collection_name
-        self.embedder = embedder or GreenLoopEmbedder()
+        self.embedder = embedder or get_cached_embedder()
         self.dense_retriever = dense_retriever or DenseRetriever(
             persist_dir=self.persist_dir,
             collection_name=collection_name,
@@ -54,6 +55,8 @@ class HybridRetriever:
             embedder=self.embedder,
         )
         self.bm25_retriever = bm25_retriever or BM25Retriever(chunks_file=self.chunks_file)
+        self._index_verified = False
+        self._verification_lock = Lock()
 
     def search(
         self,
@@ -73,7 +76,7 @@ class HybridRetriever:
             bm25_weight=bm25_weight,
             rrf_k=rrf_k,
         )
-        self._verify_compatible_indexes()
+        self._ensure_index_verified()
 
         dense_results = self.dense_retriever.search(
             query, top_k=candidate_k, document_id=document_id
@@ -90,6 +93,14 @@ class HybridRetriever:
             rrf_k=rrf_k,
         )
         return fused
+
+    def _ensure_index_verified(self) -> None:
+        if self._index_verified:
+            return
+        with self._verification_lock:
+            if not self._index_verified:
+                self._verify_compatible_indexes()
+                self._index_verified = True
 
     def _verify_compatible_indexes(self) -> None:
         manifest = read_manifest()

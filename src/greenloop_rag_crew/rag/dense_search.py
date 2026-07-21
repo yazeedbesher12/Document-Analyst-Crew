@@ -12,7 +12,7 @@ from greenloop_rag_crew.rag.chroma_store import (
     DEFAULT_CHROMA_PERSIST_DIRECTORY,
     ChromaStore,
 )
-from greenloop_rag_crew.rag.embedder import GreenLoopEmbedder
+from greenloop_rag_crew.rag.embedder import GreenLoopEmbedder, get_cached_embedder
 from greenloop_rag_crew.rag.schemas import DenseSearchResult
 from greenloop_rag_crew.runtime_paths import chroma_persist_dir, chunks_file as configured_chunks_file
 
@@ -30,7 +30,7 @@ class DenseRetriever:
         self.persist_dir = Path(persist_dir) if persist_dir is not None else chroma_persist_dir()
         self.collection_name = collection_name
         self.chunks_file = Path(chunks_file) if chunks_file is not None else configured_chunks_file()
-        self.embedder = embedder or GreenLoopEmbedder()
+        self.embedder = embedder or get_cached_embedder()
         self.store = ChromaStore(persist_dir=self.persist_dir, collection_name=collection_name)
 
     def search(

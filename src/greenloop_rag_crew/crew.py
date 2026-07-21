@@ -37,6 +37,6 @@ def create_crew(llm=None, output_path: str | Path = "output/report.md") -> CrewB
             tasks.report_task,
         ],
         process=Process.sequential,
-        verbose=True,
+        verbose=False,
     )
     return CrewBundle(agents=agents, tasks=tasks, crew=crew)

@@ -1,9 +1,15 @@
 {
   "chunk_count": 78,
+  "chunking": {
+    "max_content_tokens": 320,
+    "max_embedding_tokens": 384,
+    "overlap_tokens": 50,
+    "tokenizer_model": "sentence-transformers/all-mpnet-base-v2"
+  },
   "chunks_file": "storage/chunks.jsonl",
   "chunks_file_sha256": "3b386c26bb416fa3fe077a383f41c58bb90d3b9a8eb411c848652f71bdaeb67d",
   "collection_name": "greenloop_documents",
-  "created_at": "2026-07-14T12:30:17.397247+00:00",
+  "created_at": "2026-07-20T13:49:50.823094+00:00",
   "distance_metric": "cosine",
   "embedding_dimension": 768,
   "embedding_model": "sentence-transformers/all-mpnet-base-v2",
@@ -33,5 +39,5 @@
       "sha256": "9b36013fbb500fb158ff007b9722e5301481391da3ce6541eb00a55d65994ac3"
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

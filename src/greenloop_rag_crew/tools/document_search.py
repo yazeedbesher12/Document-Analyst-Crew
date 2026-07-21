@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from threading import Lock
 
 from crewai.tools import BaseTool
@@ -11,6 +12,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from greenloop_rag_crew.rag.document_registry import DOCUMENT_REGISTRY
 from greenloop_rag_crew.rag.hybrid_retriever import HybridRetriever
+from greenloop_rag_crew.rag.retrieval_service import RetrievalService, get_retrieval_service
 
 LOGGER = logging.getLogger(__name__)
 
@@ -19,6 +21,7 @@ RETRIEVAL_NOTICE = (
     "Retrieval scores rank relevance only. They are not probabilities or "
     "factual-confidence scores."
 )
+DEFAULT_RAG_TOP_K = 6
 
 
 class DocumentSearchInput(BaseModel):
@@ -31,8 +34,8 @@ class DocumentSearchInput(BaseModel):
             "Use separate tool calls for multi-part questions."
         ),
     )
-    top_k: int = Field(
-        default=5,
+    top_k: int | None = Field(
+        default=None,
         ge=1,
         le=10,
         description="Number of evidence chunks to return, from 1 to 10.",
@@ -81,6 +84,7 @@ class DocumentSearchTool(BaseTool):
     args_schema: type[BaseModel] = DocumentSearchInput
 
     _retriever: HybridRetriever | None = PrivateAttr(default=None)
+    _retrieval_service: RetrievalService | None = PrivateAttr(default=None)
     _initialization_lock: Lock = PrivateAttr(default_factory=Lock)
     _search_lock: Lock = PrivateAttr(default_factory=Lock)
 
@@ -96,13 +100,14 @@ class DocumentSearchTool(BaseTool):
             validated = DocumentSearchInput.model_validate(
                 {"query": query, "top_k": top_k, "document_id": document_id}
             )
-            retriever = self._get_retriever()
+            service = self._get_retrieval_service()
+            selected_top_k = validated.top_k if validated.top_k is not None else rag_top_k()
             # Chroma's local persistent client is not safe to initialize/query from
             # concurrent tool calls on this runtime. Keep one client and serialize it.
             with self._search_lock:
-                results = retriever.search(
+                results = service.search(
                     validated.query,
-                    top_k=validated.top_k,
+                    top_k=selected_top_k,
                     document_id=validated.document_id,
                 )
             if not results:
@@ -145,11 +150,31 @@ class DocumentSearchTool(BaseTool):
             )
 
     def _get_retriever(self) -> HybridRetriever:
+        """Return the shared retriever for legacy diagnostics and tests."""
+
+        return self._get_retrieval_service().retriever
+
+    def _get_retrieval_service(self) -> RetrievalService:
         if self._retriever is None:
             with self._initialization_lock:
                 if self._retriever is None:
-                    self._retriever = HybridRetriever()
-        return self._retriever
+                    self._retrieval_service = get_retrieval_service()
+                    self._retriever = self._retrieval_service.retriever
+        assert self._retrieval_service is not None
+        return self._retrieval_service
+
+
+def rag_top_k() -> int:
+    """Return a bounded retrieval budget from RAG_TOP_K without changing evidence format."""
+
+    raw_value = os.getenv("RAG_TOP_K", str(DEFAULT_RAG_TOP_K)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("RAG_TOP_K must be an integer between 1 and 10.") from exc
+    if not 1 <= value <= 10:
+        raise ValueError("RAG_TOP_K must be between 1 and 10.")
+    return value
 
 
 def _classify_tool_error(exc: Exception) -> tuple[str, str]:
