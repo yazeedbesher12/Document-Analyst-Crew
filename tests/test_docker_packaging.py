@@ -14,7 +14,7 @@ def test_dockerfile_uses_locked_dependencies_and_streamlit_entrypoint():
     assert "EXPOSE 8501" in dockerfile
     assert "_stcore/health" in dockerfile
     assert "OLLAMA_BASE_URL" not in dockerfile
-    assert ".env" in dockerfile
+    assert "COPY .env" not in dockerfile
 
 
 def test_project_selects_cpu_torch_wheels_for_linux_containers():
