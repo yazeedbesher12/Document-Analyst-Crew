@@ -1,3 +1,4 @@
+Deployment URL : https://document-analyst-crew.streamlit.app/
 # GreenLoop RAG Document Analyst Crew
 
 This project answers GreenLoop document questions with a CrewAI workflow. It searches only the three PDFs in `knowledge/`; it does not use web search. Ollama is the local default, and OpenRouter is available for Streamlit Community Cloud.
