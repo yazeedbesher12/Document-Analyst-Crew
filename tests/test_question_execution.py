@@ -79,11 +79,13 @@ def test_each_execution_creates_a_fresh_crew_and_passes_the_question(tmp_path):
         "What is the remote work policy?",
         output_dir=tmp_path,
         crew_factory=fake_factory,
+        mode="legacy",
     )
     second = execute_question(
         "What laboratory accuracy was achieved?",
         output_dir=tmp_path,
         crew_factory=fake_factory,
+        mode="legacy",
     )
 
     assert len(crews) == 2
@@ -100,7 +102,9 @@ def test_execution_error_is_safe_and_does_not_expose_internal_exception(tmp_path
         raise RuntimeError(r"D:\internal\secret-path API_KEY=not-for-display")
 
     with pytest.raises(CrewExecutionError) as captured:
-        execute_question("Question", output_dir=tmp_path, crew_factory=failing_factory)
+        execute_question(
+            "Question", output_dir=tmp_path, crew_factory=failing_factory, mode="legacy"
+        )
 
     message = str(captured.value)
     assert "could not complete" in message
@@ -118,6 +122,7 @@ def test_retrieval_failure_is_classified_without_internal_details(tmp_path):
             "Question",
             output_dir=tmp_path,
             crew_factory=lambda **_kwargs: FakeBundle(crew=FailingCrew()),
+            mode="legacy",
         )
 
     assert "document retrieval" in str(captured.value).lower()

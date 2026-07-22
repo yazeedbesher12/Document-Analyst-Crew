@@ -49,6 +49,7 @@ def test_execution_records_public_stage_timings_and_progress(monkeypatch, tmp_pa
         crew_factory=lambda **_kwargs: bundle,
         retrieval_service=FakeRetrievalService(),
         progress_callback=lambda stage, elapsed: progress.append((stage, elapsed)),
+        mode="legacy",
     )
 
     expected_stages = {

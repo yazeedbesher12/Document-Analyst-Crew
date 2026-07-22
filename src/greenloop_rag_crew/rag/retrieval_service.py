@@ -54,6 +54,8 @@ class RetrievalService:
         query: str,
         top_k: int,
         document_id: str | None = None,
+        dense_candidate_k: int | None = None,
+        bm25_candidate_k: int | None = None,
     ) -> list[HybridSearchResult]:
         """Run one serialized local Chroma/BM25 search and log only timing metadata."""
 
@@ -63,6 +65,8 @@ class RetrievalService:
                 query=query,
                 top_k=top_k,
                 document_id=document_id,
+                dense_candidate_k=dense_candidate_k,
+                bm25_candidate_k=bm25_candidate_k,
             )
             elapsed = perf_counter() - started
             self.retrieval_calls += 1

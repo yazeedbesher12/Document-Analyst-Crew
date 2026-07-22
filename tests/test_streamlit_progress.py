@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from streamlit_app import _StageProgress
+from streamlit_app import _StageProgress, _StreamingAnswer, _generation_metrics_text
 
 
 class FakeStatus:
@@ -16,6 +16,14 @@ class FakeStatus:
 
     def update(self, **kwargs):
         self.updates.append(kwargs)
+
+
+class FakePlaceholder:
+    def __init__(self):
+        self.markdowns = []
+
+    def markdown(self, value):
+        self.markdowns.append(value)
 
 
 def test_stage_progress_displays_completed_stage_durations():
@@ -40,3 +48,36 @@ def test_stage_progress_displays_completed_stage_durations():
         {"label": "Writing report", "state": "running"},
         {"label": "Completed (11.4s)", "state": "complete"},
     ]
+
+
+def test_streamed_answer_updates_incrementally_and_keeps_completed_markdown():
+    status = FakeStatus()
+    progress = _StageProgress(status)
+    progress.advance("Writing answer", 0.0)
+    placeholder = FakePlaceholder()
+    answer = _StreamingAnswer(placeholder, progress)
+
+    answer.push("Hello")
+    answer.push(" world")
+    answer.replace_with_complete("## Direct Answer\nHello world")
+
+    assert placeholder.markdowns[:2] == ["Hello\n\n...", "Hello world\n\n..."]
+    assert placeholder.markdowns[-1] == "## Direct Answer\nHello world"
+    assert any(update["label"].startswith("Writing answer (") for update in status.updates)
+
+
+def test_generation_metrics_are_safe_and_displayable():
+    text = _generation_metrics_text(
+        {
+            "time_to_first_token_seconds": 0.4,
+            "generation_seconds": 2.0,
+            "generated_output_tokens": 10,
+            "tokens_per_second": 5.0,
+            "model_already_loaded": True,
+        },
+        1,
+    )
+
+    assert "LLM requests: 1" in text
+    assert "First token: 0.4s" in text
+    assert "Model already loaded: yes" in text

@@ -11,6 +11,7 @@ DEFAULT_CHROMA_DIRECTORY = DEFAULT_STORAGE_DIRECTORY / "chroma"
 DEFAULT_OUTPUT_DIRECTORY = Path("output")
 DEFAULT_CHUNKS_FILE = DEFAULT_STORAGE_DIRECTORY / "chunks.jsonl"
 DEFAULT_MANIFEST_FILE = DEFAULT_STORAGE_DIRECTORY / "index_manifest.json"
+DEFAULT_ANSWER_CACHE_DIRECTORY = DEFAULT_STORAGE_DIRECTORY / "answer_cache"
 
 
 def knowledge_dir() -> Path:
@@ -35,6 +36,15 @@ def output_dir(*, create: bool = True) -> Path:
     """Return the writable report directory."""
 
     path = _environment_path("OUTPUT_DIR", DEFAULT_OUTPUT_DIRECTORY)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def answer_cache_dir(*, create: bool = True) -> Path:
+    """Return the persistent exact-answer cache directory."""
+
+    path = _environment_path("RAG_ANSWER_CACHE_DIR", DEFAULT_ANSWER_CACHE_DIRECTORY)
     if create:
         path.mkdir(parents=True, exist_ok=True)
     return path

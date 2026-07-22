@@ -1,6 +1,6 @@
 # GreenLoop RAG Document Analyst Crew
 
-This project answers GreenLoop document questions with a CrewAI workflow. It searches only the three PDFs in `knowledge/`; it does not use web search. Ollama is the local default, with an optional Azure runtime provider.
+This project answers GreenLoop document questions with a CrewAI workflow. It searches only the three PDFs in `knowledge/`; it does not use web search. Ollama is the local default, and OpenRouter is available for Streamlit Community Cloud.
 
 ## Architecture
 
@@ -41,9 +41,9 @@ uv sync
 
 Optional local settings are documented in `.env.example`. Do not commit a real `.env` file.
 
-`LLM_PROVIDER=ollama` is the default and uses `OLLAMA_MODEL=qwen3:8b`. To use Azure at runtime, set `LLM_PROVIDER=azure` plus `AZURE_LLM_MODEL`, `AZURE_API_KEY`, and `AZURE_ENDPOINT`; `AZURE_API_VERSION` is optional. These settings are validated before a crew starts, and API keys are never logged.
+`LLM_PROVIDER=ollama` is the default and uses `OLLAMA_MODEL=qwen3:8b` at `OLLAMA_BASE_URL=http://localhost:11434`. This route preserves `OLLAMA_THINK=false`, `OLLAMA_KEEP_ALIVE=30m`, and streamed answers. `MODEL=ollama/qwen3:8b` remains supported for existing local configurations.
 
-For concise factual retrieval, the default runtime settings are `OLLAMA_THINK=false`, `LLM_TEMPERATURE=0.1`, `LLM_MAX_TOKENS=900`, and `RAG_TOP_K=6`. CrewAI 1.15.2 routes Ollama through its OpenAI-compatible client; the application uses that client's supported `extra_body` request field to send `think: false`. The setting was verified with a real local qwen3:8b request.
+For concise factual retrieval, the default runtime settings are `OLLAMA_THINK=false`, `LLM_TEMPERATURE=0.1`, `LLM_MAX_TOKENS=400`, `LLM_NUM_CTX=3072`, `RAG_FINAL_CONTEXT_CHUNKS=4`, and `RAG_MAX_CONTEXT_CHARS=7000`.
 
 ## Build the Local Index
 
@@ -54,7 +54,7 @@ uv run python -m greenloop_rag_crew.rag.build_chunks
 uv run python -m greenloop_rag_crew.rag.build_index
 ```
 
-`storage/chunks.jsonl` contains the page-aware chunks. `storage/index_manifest.json` records source hashes and prevents accidental use of a stale Chroma index.
+`storage/chunks.jsonl` contains the page-aware chunks. `storage/index_manifest.json` records source hashes and prevents accidental use of a stale Chroma index. The prebuilt portable Chroma artifacts in `storage/chroma/` are included with the repository (about 3.3 MB); matching PDFs and manifest load them without re-extracting documents or rebuilding document embeddings. A normal question creates only its query embedding.
 
 ## Run the Configured Reports
 
@@ -104,6 +104,33 @@ uv run streamlit run streamlit_app.py
 
 Each submitted question creates a fresh CrewAI crew and a unique Markdown report in `output/`.
 
+## Streamlit Community Cloud Deployment
+
+The root entrypoint is `streamlit_app.py`. This repository uses the committed `pyproject.toml` and `uv.lock` as its single Streamlit Community Cloud dependency configuration; the project supports Python 3.12.
+
+1. Push the repository, including `knowledge/`, `storage/chunks.jsonl`, `storage/index_manifest.json`, and `storage/chroma/`, to GitHub. Do not push `.env`, `.streamlit/secrets.toml`, model caches, or generated ad-hoc reports.
+2. In Streamlit Community Cloud, create an app from the repository and branch. Set the main file path to `streamlit_app.py`.
+3. In the Advanced settings, select Python 3.12 and add these root-level secrets. Replace only the API-key placeholder with a real key:
+
+```toml
+LLM_PROVIDER = "openrouter"
+OPENROUTER_API_KEY = "your-openrouter-key"
+OPENROUTER_MODEL = "qwen/qwen3-8b"
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+```
+
+4. Deploy the app. The cloud route uses OpenRouter only; it never attempts to contact `localhost` or the local Ollama service. The UI safely shows `Provider: OpenRouter` and the selected model, never the API key.
+
+For local development, keep this explicit configuration in an untracked `.env` file or shell environment:
+
+```dotenv
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=qwen3:8b
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_THINK=false
+OLLAMA_KEEP_ALIVE=30m
+```
+
 ## Docker Preparation
 
 The Docker image packages the three PDFs from `knowledge/` with the application source and JSONC configuration. It deliberately does not include the host Chroma database: the container creates its own chunks and Chroma index from those packaged PDFs at startup. The `sentence-transformers/all-mpnet-base-v2` cache is prepared during the image build so startup does not need to download it again.
@@ -118,7 +145,7 @@ The image runs the existing Streamlit entrypoint on port `8501`. Copy `docker.en
 docker compose up --build
 ```
 
-For Azure, pass `AZURE_API_KEY`, `AZURE_ENDPOINT`, `AZURE_LLM_MODEL`, and optional `AZURE_API_VERSION` only at runtime. No API key or `.env` file is copied into an image layer.
+For OpenRouter, pass `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, and `OPENROUTER_BASE_URL` only at runtime with `LLM_PROVIDER=openrouter`. No API key or `.env` file is copied into an image layer.
 
 ## Validate Deliverables
 

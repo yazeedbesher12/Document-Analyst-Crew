@@ -168,3 +168,119 @@ failed to connect to the docker API at npipe:////./pipe/dockerDesktopLinuxEngine
   CUDA verification, health check, and containerized end-to-end validation
   remain unavailable. No images or temporary containers were created or
   removed.
+
+## Step 6: Single-Generation Fast Request Pipeline
+
+Status: complete
+
+- Before this change, the default path always constructed the sequential
+  three-agent CrewAI crew. The Document Researcher task, Fact Checker task,
+  and Report Writer task each required an LLM generation; the two retrieval
+  agents could also make additional Agent iterations around `document_search`.
+  `document_search` itself does not call an LLM. This explains the observed
+  approximately 532-second researcher and 537-second fact-checker stages.
+- `RAG_PIPELINE_MODE=fast` is now the default. It performs persistent-index
+  preparation, hybrid Chroma/BM25 retrieval, deduplication, citation-metadata
+  verification, and citation rendering deterministically, then makes exactly
+  one direct Ollama `/api/chat` request. It does not construct a CrewAI agent,
+  task, or tool loop.
+- `RAG_PIPELINE_MODE=strict` requires `STRICT_LLM_VERIFICATION=true` and uses
+  at most two direct requests: answer generation plus one strict citation
+  review. `RAG_PIPELINE_MODE=legacy` retains the existing three-agent CrewAI
+  workflow and its previous LLM-call behavior.
+- The fast prompt is bounded by `RAG_TOP_K_VECTOR=4`, `RAG_TOP_K_BM25=4`,
+  `RAG_FINAL_CONTEXT_CHUNKS=5`, and `RAG_MAX_CONTEXT_CHARS=12000`. Citation
+  headers are never truncated. Exact-answer cache keys include normalized
+  question, index signature, model, generation settings, mode, and pipeline
+  version. The cache is enabled by default with `RAG_ANSWER_CACHE=true`.
+- Direct Ollama controls are `LLM_TEMPERATURE=0.1`, `LLM_MAX_TOKENS=512`,
+  `LLM_NUM_CTX=4096`, `OLLAMA_THINK=false`, and `OLLAMA_KEEP_ALIVE=30m`.
+  Safe metrics record mode, retrieval count/duration, token counts when
+  returned by Ollama, request count, model-load/prompt-evaluation/generation
+  durations, cache hit/miss, and total request duration. No prompt, document,
+  secret, or reasoning text is logged.
+
+### Focused Verification
+
+Command run:
+
+```powershell
+uv run pytest -q tests/test_fast_pipeline.py tests/test_ollama_client.py tests/test_question_execution.py tests/test_execution_timing.py tests/test_llm_config.py tests/test_hybrid_retriever.py
+```
+
+Result: `35 passed in 54.95s`.
+
+The tests cover one-request fast mode, zero-request deterministic retrieval and
+metadata verification, strict two-request ceiling, retained legacy mode,
+absence of a CrewAI tool loop in fast mode, exact-cache hit and invalidation,
+citation-ID containment, metadata-preserving truncation, and outgoing
+`think=false`/`keep_alive` request payloads. `uv run python -m compileall -q
+src streamlit_app.py` and `git diff --check` also passed.
+
+### One Real Ollama Smoke Request
+
+The diagnostic process explicitly selected local Ollama without changing the
+Azure-oriented `.env` file. One short request completed with these safe
+metrics:
+
+- request count: `1`
+- `think_requested=false`; returned thinking content: `false`
+- keep-alive requested: `30m`
+- input/output tokens: `21` / `2`
+- model load: `106.870s`; prompt evaluation: `2.281s`; generation: `0.148s`
+- total request: `111.410s`
+
+`ollama ps` immediately afterward showed `qwen3:8b`, `6.0 GB`,
+`61%/39% CPU/GPU`, context `4096`, resident for approximately 29 more minutes.
+The remaining local latency bottleneck is cold model loading; subsequent
+requests during the keep-alive window avoid that load cost.
+
+## Step 7: Streamed Concise Answer Generation
+
+Status: implementation complete; real Ollama smoke blocked
+
+- Fast-mode answer generation now uses one streamed Ollama `/api/chat` request.
+  Streamlit displays answer tokens through an updating placeholder as they
+  arrive, retains the completed report in session state, and keeps the public
+  Writing answer timer updating until the stream ends.
+- The answer format is now `## Direct Answer`, `## Evidence` (at most four
+  inline-cited bullets), and `## Limitation` only when evidence is incomplete.
+  The former executive summary, repeated findings, and bibliography section
+  are not generated or rendered. Output is deterministically bounded to 300
+  words without splitting a citation-bearing line.
+- Defaults are `LLM_MAX_TOKENS=400`, `LLM_TEMPERATURE=0.1`,
+  `LLM_NUM_CTX=3072`, `OLLAMA_THINK=false`, `OLLAMA_KEEP_ALIVE=30m`,
+  `RAG_FINAL_CONTEXT_CHUNKS=4`, and `RAG_MAX_CONTEXT_CHARS=7000`.
+  The exact-answer cache pipeline version changed so stale long-form results
+  cannot be reused.
+- Safe metrics now include time to first token, total generation duration,
+  generated token count, approximate tokens per second, total LLM requests,
+  and whether Ollama reported the model as already loaded.
+
+### Focused Verification
+
+```powershell
+uv run pytest -q tests/test_ollama_client.py tests/test_fast_pipeline.py tests/test_streamlit_progress.py tests/test_llm_config.py tests/test_question_execution.py
+```
+
+Result: `29 passed in 12.75s`.
+
+The mocked coverage verifies `stream=true`, `think=false`, keep-alive and
+generation options in the outgoing request; incremental token delivery;
+completed-answer replacement; one fast-mode request; a 400-token request
+limit; inline citation containment; no bibliography; four Evidence bullets;
+and safe UI metrics. Compile and diff checks also passed.
+
+### One Real Concise Smoke Request
+
+The one permitted real request used the question "What were GreenLoop's Q3
+FY2025 revenue and growth compared with Q2?" with the exact-answer cache
+disabled for that process. Index/retrieval completed, but Ollama returned HTTP
+500 before the first streamed token. It took `140.8s` wall-clock including
+local retrieval/embedding initialization; no answer, first-token time,
+generated token count, or tokens-per-second measurement is available.
+
+No retry was issued. `ollama ps` after the failure showed no active model;
+`ollama list` still showed `qwen3:8b` installed. The remaining blocker is the
+local Ollama HTTP 500, not the index, retrieval, streaming client, or citation
+rendering code.

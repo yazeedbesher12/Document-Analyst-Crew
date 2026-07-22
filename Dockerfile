@@ -15,9 +15,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SENTENCE_TRANSFORMERS_HOME=/app/storage/cache/sentence_transformers \
     EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2 \
     OLLAMA_THINK=false \
+    OLLAMA_KEEP_ALIVE=30m \
     LLM_TEMPERATURE=0.1 \
-    LLM_MAX_TOKENS=900 \
-    RAG_TOP_K=6
+    LLM_MAX_TOKENS=400 \
+    LLM_NUM_CTX=3072 \
+    RAG_PIPELINE_MODE=fast \
+    STRICT_LLM_VERIFICATION=false \
+    RAG_ANSWER_CACHE=true \
+    RAG_TOP_K_VECTOR=4 \
+    RAG_TOP_K_BM25=4 \
+    RAG_FINAL_CONTEXT_CHUNKS=4 \
+    RAG_MAX_CONTEXT_CHARS=7000 \
+    RAG_ANSWER_CACHE_DIR=/app/storage/answer_cache
 
 WORKDIR /app
 

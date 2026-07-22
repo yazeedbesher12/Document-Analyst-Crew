@@ -11,7 +11,23 @@ from uuid import uuid4
 
 from greenloop_rag_crew.crew import create_crew
 from greenloop_rag_crew.diagnostics.ollama_tool_check import check_ollama_health
-from greenloop_rag_crew.llm import LLMConfigurationError, LLMSettings, get_provider_settings
+from greenloop_rag_crew.fast_pipeline import (
+    ExactAnswerCache,
+    PipelineConfigurationError,
+    pipeline_mode,
+    run_fast_pipeline,
+)
+from greenloop_rag_crew.llm import (
+    LLMConfigurationError,
+    LLMSettings,
+    get_generation_settings,
+    get_provider_settings,
+)
+from greenloop_rag_crew.ollama_client import (
+    GenerationResponse,
+    generate_chat_stream,
+)
+from greenloop_rag_crew.openrouter_client import generate_chat_stream as generate_openrouter_chat_stream
 from greenloop_rag_crew.runtime_paths import output_dir as configured_output_dir
 from greenloop_rag_crew.rag.retrieval_service import RetrievalService, get_retrieval_service
 from greenloop_rag_crew.timing import RequestTiming
@@ -55,7 +71,7 @@ class ProviderConfigurationError(QuestionExecutionError):
 
 @dataclass(frozen=True)
 class QuestionExecutionResult:
-    """The safe, user-facing output from one fresh CrewAI run."""
+    """The safe, user-facing output from one isolated request execution."""
 
     question: str
     output_path: Path
@@ -63,6 +79,8 @@ class QuestionExecutionResult:
     timings: dict[str, float]
     llm_calls: int | None
     retrieval_calls: int
+    pipeline_mode: str
+    metrics: dict[str, object]
 
 
 def validate_question(question: str) -> str:
@@ -94,8 +112,12 @@ def execute_question(
     crew_factory: Callable[..., Any] = create_crew,
     retrieval_service: RetrievalService | None = None,
     progress_callback: Callable[[str, float], None] | None = None,
+    answer_generator: Callable[[str], GenerationResponse] | None = None,
+    answer_cache: ExactAnswerCache | None = None,
+    mode: str | None = None,
+    token_callback: Callable[[str], None] | None = None,
 ) -> QuestionExecutionResult:
-    """Run one fresh crew and return its Markdown without internal errors."""
+    """Run one fresh fast, strict, or legacy execution without leaking internals."""
 
     normalized = validate_question(question)
     output_path = create_unique_report_path(normalized, output_dir=output_dir)
@@ -104,44 +126,96 @@ def execute_question(
     timing.begin("application_initialization")
     try:
         retrieval_service = retrieval_service or get_retrieval_service()
-        check_llm_preflight()
+        llm_settings = check_llm_preflight()
+        generation_settings = get_generation_settings()
+        selected_mode = mode or pipeline_mode()
     except Exception:
         timing.finish("application_initialization")
         timing.finish_request()
         raise
     initialization_elapsed = timing.finish("application_initialization")
-    _notify_progress(progress_callback, "Researching documents", initialization_elapsed)
+    _notify_progress(
+        progress_callback,
+        "Researching documents" if selected_mode == "legacy" else "Retrieving evidence",
+        initialization_elapsed,
+    )
     retrieval_calls_before, retrieval_seconds_before = retrieval_service.metrics_snapshot()
 
     try:
-        bundle = crew_factory(output_path=output_path)
-        _attach_task_timing(bundle, timing, progress_callback)
-        timing.begin("researcher_execution")
-        timing.begin("total_crew_execution")
-        kickoff_result = bundle.crew.kickoff(inputs={"question": normalized})
-        timing.finish("researcher_execution")
-        timing.finish("fact_checker_execution")
-        timing.finish("report_writer_execution")
-        timing.finish("total_crew_execution")
-        report_markdown = _read_or_write_report(output_path, kickoff_result)
+        if selected_mode == "legacy":
+            report_markdown, llm_calls, metrics = _execute_legacy(
+                normalized,
+                output_path,
+                crew_factory,
+                timing,
+                progress_callback,
+            )
+        else:
+            timing.begin("retrieval_execution")
+
+            def fast_progress(stage: str, elapsed_seconds: float) -> None:
+                if stage == "Verifying citation metadata":
+                    timing.finish("retrieval_execution")
+                    timing.begin("citation_verification")
+                elif stage == "Writing answer":
+                    timing.finish("citation_verification")
+                    timing.begin("answer_generation")
+                _notify_progress(progress_callback, stage, elapsed_seconds)
+
+            generator = answer_generator or _configured_answer_generator(
+                llm_settings, generation_settings, token_callback=token_callback
+            )
+            fast_result = run_fast_pipeline(
+                question=normalized,
+                service=retrieval_service,
+                llm_settings=llm_settings,
+                generation_settings=generation_settings,
+                generate=generator,
+                mode=selected_mode,
+                cache=answer_cache,
+                progress_callback=fast_progress,
+            )
+            timing.finish("retrieval_execution")
+            timing.finish("citation_verification")
+            timing.finish("answer_generation")
+            report_markdown = fast_result.report_markdown
+            llm_calls = fast_result.llm_calls
+            metrics = fast_result.metrics
+            metrics["deterministic_verification_warnings"] = len(
+                fast_result.verification.warnings
+            )
+            output_path.write_text(report_markdown, encoding="utf-8")
     except Exception as exc:
+        timing.finish("retrieval_execution")
+        timing.finish("citation_verification")
+        timing.finish("answer_generation")
         timing.finish("researcher_execution")
         timing.finish("fact_checker_execution")
         timing.finish("report_writer_execution")
         timing.finish("total_crew_execution")
-        LOGGER.exception("CrewAI document analysis failed.")
+        LOGGER.exception("Document analysis execution failed.")
         raise _classify_execution_error(exc) from exc
     finally:
         timing.finish_request()
 
-    _notify_progress(
-        progress_callback,
-        "Completed",
-        timing.durations.get("report_writer_execution", 0.0),
-    )
+    completion_stage = "report_writer_execution" if selected_mode == "legacy" else "answer_generation"
+    _notify_progress(progress_callback, "Completed", timing.durations.get(completion_stage, 0.0))
     retrieval_calls_after, retrieval_seconds_after = retrieval_service.metrics_snapshot()
     timing.durations["total_retrieval_execution"] = (
         retrieval_seconds_after - retrieval_seconds_before
+    )
+    LOGGER.info(
+        "request_metrics pipeline_mode=%s retrieved_chunks=%s llm_request_count=%s "
+        "answer_cache=%s first_token_seconds=%s generation_seconds=%s output_tokens=%s "
+        "total_request_seconds=%.3f",
+        selected_mode,
+        metrics.get("retrieved_chunks", 0),
+        llm_calls,
+        metrics.get("answer_cache", "disabled"),
+        metrics.get("time_to_first_token_seconds"),
+        metrics.get("generation_seconds"),
+        metrics.get("generated_output_tokens"),
+        timing.durations.get("total_request_execution", 0.0),
     )
 
     return QuestionExecutionResult(
@@ -149,9 +223,63 @@ def execute_question(
         output_path=output_path,
         report_markdown=report_markdown,
         timings=timing.snapshot(),
-        llm_calls=_observed_llm_calls(bundle.crew),
+        llm_calls=llm_calls,
         retrieval_calls=retrieval_calls_after - retrieval_calls_before,
+        pipeline_mode=selected_mode,
+        metrics=metrics,
     )
+
+
+def _execute_legacy(
+    question: str,
+    output_path: Path,
+    crew_factory: Callable[..., Any],
+    timing: RequestTiming,
+    progress_callback: Callable[[str, float], None] | None,
+) -> tuple[str, int | None, dict[str, object]]:
+    """Run the retained multi-agent CrewAI workflow only when explicitly selected."""
+
+    bundle = crew_factory(output_path=output_path)
+    _attach_task_timing(bundle, timing, progress_callback)
+    timing.begin("researcher_execution")
+    timing.begin("total_crew_execution")
+    kickoff_result = bundle.crew.kickoff(inputs={"question": question})
+    timing.finish("researcher_execution")
+    timing.finish("fact_checker_execution")
+    timing.finish("report_writer_execution")
+    timing.finish("total_crew_execution")
+    return (
+        _read_or_write_report(output_path, kickoff_result),
+        _observed_llm_calls(bundle.crew),
+        {"answer_cache": "disabled", "retrieved_chunks": 0},
+    )
+
+
+def _configured_answer_generator(
+    settings: LLMSettings,
+    generation_settings,
+    *,
+    token_callback: Callable[[str], None] | None = None,
+) -> Callable[[str], GenerationResponse]:
+    """Return one direct streaming call for the explicitly selected provider."""
+
+    if settings.provider == "ollama":
+        return lambda prompt: generate_chat_stream(
+            settings=settings,
+            generation=generation_settings,
+            messages=[{"role": "user", "content": prompt}],
+            on_token=token_callback or (lambda _token: None),
+        )
+
+    if settings.provider == "openrouter":
+        return lambda prompt: generate_openrouter_chat_stream(
+            settings=settings,
+            generation=generation_settings,
+            messages=[{"role": "user", "content": prompt}],
+            on_token=token_callback or (lambda _token: None),
+        )
+
+    raise RuntimeError(f"Unsupported configured provider: {settings.provider}.")
 
 
 def check_ollama_preflight(timeout: float = OLLAMA_PREFLIGHT_TIMEOUT_SECONDS) -> None:

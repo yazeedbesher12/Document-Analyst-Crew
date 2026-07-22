@@ -1,6 +1,7 @@
 .env
 .env.local
 .env.*.local
+.streamlit/secrets.toml
 *.env
 *.env.*
 !.env.example
@@ -10,8 +11,17 @@ __pycache__/
 **/__pycache__/
 *.pyc
 .pytest_cache/
-storage/chroma/
+*.pytest_cache/
+storage/answer_cache/
 output/*.md
+output/*.markdown
+output/*.txt
+.agent_harnesses.json
+CACHEDIR.TAG
+models--sentence-transformers--all-mpnet-base-v2/
+models--*/
+.cache/
+.huggingface/
 !output/report_01_remote_work_and_revenue.md
 !output/report_02_accuracy_comparison.md
 !output/report_03_sla_and_revenue_loss.md

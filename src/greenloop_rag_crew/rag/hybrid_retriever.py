@@ -64,14 +64,23 @@ class HybridRetriever:
         top_k: int = 5,
         document_id: str | None = None,
         candidate_k: int = DEFAULT_CANDIDATE_K,
+        dense_candidate_k: int | None = None,
+        bm25_candidate_k: int | None = None,
         dense_weight: float = DEFAULT_DENSE_WEIGHT,
         bm25_weight: float = DEFAULT_BM25_WEIGHT,
         rrf_k: int = DEFAULT_RRF_K,
     ) -> list[HybridSearchResult]:
+        separate_candidate_limits = (
+            dense_candidate_k is not None or bm25_candidate_k is not None
+        )
+        dense_candidate_k = dense_candidate_k or candidate_k
+        bm25_candidate_k = bm25_candidate_k or candidate_k
         weights = _validate_search_args(
             query=query,
             top_k=top_k,
-            candidate_k=candidate_k,
+            dense_candidate_k=dense_candidate_k,
+            bm25_candidate_k=bm25_candidate_k,
+            require_candidates_cover_top_k=not separate_candidate_limits,
             dense_weight=dense_weight,
             bm25_weight=bm25_weight,
             rrf_k=rrf_k,
@@ -79,10 +88,10 @@ class HybridRetriever:
         self._ensure_index_verified()
 
         dense_results = self.dense_retriever.search(
-            query, top_k=candidate_k, document_id=document_id
+            query, top_k=dense_candidate_k, document_id=document_id
         )
         bm25_results = self.bm25_retriever.search(
-            query, top_k=candidate_k, document_id=document_id
+            query, top_k=bm25_candidate_k, document_id=document_id
         )
         fused = fuse_results(
             dense_results=dense_results,
@@ -197,7 +206,9 @@ def fuse_results(
 def _validate_search_args(
     query: str,
     top_k: int,
-    candidate_k: int,
+    dense_candidate_k: int,
+    bm25_candidate_k: int,
+    require_candidates_cover_top_k: bool,
     dense_weight: float,
     bm25_weight: float,
     rrf_k: int,
@@ -206,7 +217,9 @@ def _validate_search_args(
         raise ValueError("query must not be empty.")
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero.")
-    if candidate_k < top_k:
+    if dense_candidate_k <= 0 or bm25_candidate_k <= 0:
+        raise ValueError("candidate counts must be greater than zero.")
+    if require_candidates_cover_top_k and min(dense_candidate_k, bm25_candidate_k) < top_k:
         raise ValueError("candidate_k must be at least top_k.")
     if dense_weight < 0 or bm25_weight < 0:
         raise ValueError("retrieval weights must be non-negative.")

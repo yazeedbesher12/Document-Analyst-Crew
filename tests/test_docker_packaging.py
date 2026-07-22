@@ -58,5 +58,5 @@ def test_docker_environment_example_contains_placeholders_only():
 
     assert "LLM_PROVIDER=ollama" in environment_example
     assert "OLLAMA_BASE_URL=http://host.docker.internal:11434" in environment_example
-    assert "AZURE_API_KEY=" in environment_example
-    assert "AZURE_ENDPOINT=" in environment_example
+    assert "OPENROUTER_API_KEY=" in environment_example
+    assert "OPENROUTER_BASE_URL=https://openrouter.ai/api/v1" in environment_example

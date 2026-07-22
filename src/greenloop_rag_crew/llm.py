@@ -13,8 +13,12 @@ DEFAULT_LLM_PROVIDER = "ollama"
 DEFAULT_OLLAMA_MODEL = "qwen3:8b"
 DEFAULT_MODEL = f"ollama/{DEFAULT_OLLAMA_MODEL}"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_OPENROUTER_MODEL = "qwen/qwen3-8b"
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_LLM_TEMPERATURE = 0.1
-DEFAULT_LLM_MAX_TOKENS = 900
+DEFAULT_LLM_MAX_TOKENS = 400
+DEFAULT_LLM_NUM_CTX = 3072
+DEFAULT_OLLAMA_KEEP_ALIVE = "30m"
 # qwen3:8b generates at about 2 tokens/second on the target local machine.
 # Allow a complete response instead of triggering automatic retries.
 DEFAULT_TIMEOUT_SECONDS = 600
@@ -28,8 +32,8 @@ class OllamaConfigurationError(LLMConfigurationError):
     """Raised when local Ollama settings are invalid."""
 
 
-class AzureConfigurationError(LLMConfigurationError):
-    """Raised when Azure runtime configuration is incomplete or invalid."""
+class OpenRouterConfigurationError(LLMConfigurationError):
+    """Raised when the OpenRouter runtime configuration is incomplete or invalid."""
 
 
 @dataclass(frozen=True)
@@ -43,32 +47,53 @@ class LLMSettings:
     api_key: str | None = field(default=None, repr=False)
 
 
+@dataclass(frozen=True)
+class GenerationSettings:
+    """Validated runtime controls shared by direct and CrewAI LLM calls."""
+
+    temperature: float
+    max_tokens: int
+    num_ctx: int
+    think: bool
+    keep_alive: str
+
+
 def create_llm() -> LLM:
     """Create a CrewAI LLM for the environment-selected provider."""
 
     settings = get_provider_settings()
+    generation = get_generation_settings()
     shared_options = {
         "model": settings.model,
-        "temperature": _configured_temperature(),
+        "temperature": generation.temperature,
         "top_p": 0.95,
         "timeout": DEFAULT_TIMEOUT_SECONDS,
-        "max_tokens": _configured_max_tokens(),
+        "max_tokens": generation.max_tokens,
     }
 
     if settings.provider == "ollama":
-        additional_params = {"extra_body": {"think": False}} if not ollama_thinking_enabled() else {}
+        additional_params = {
+            "extra_body": {
+                "think": generation.think,
+                "keep_alive": generation.keep_alive,
+                "options": {"num_ctx": generation.num_ctx},
+            }
+        }
         return LLM(
             base_url=settings.base_url,
             additional_params=additional_params,
             **shared_options,
         )
 
-    # CrewAI's native Azure provider accepts endpoint/api_version directly.
+    # Legacy CrewAI mode uses LiteLLM's OpenRouter provider identifier.
     return LLM(
-        endpoint=settings.base_url,
+        model=f"openrouter/{settings.model}",
+        base_url=settings.base_url,
         api_key=settings.api_key,
-        api_version=settings.api_version,
-        **shared_options,
+        temperature=generation.temperature,
+        top_p=0.95,
+        timeout=DEFAULT_TIMEOUT_SECONDS,
+        max_tokens=generation.max_tokens,
     )
 
 
@@ -79,10 +104,22 @@ def get_provider_settings() -> LLMSettings:
     provider = os.getenv("LLM_PROVIDER", DEFAULT_LLM_PROVIDER).strip().lower()
     if provider == "ollama":
         return _ollama_settings()
-    if provider == "azure":
-        return _azure_settings()
+    if provider == "openrouter":
+        return _openrouter_settings()
     raise LLMConfigurationError(
-        "LLM_PROVIDER must be either 'ollama' or 'azure'."
+        "LLM_PROVIDER must be either 'ollama' or 'openrouter'."
+    )
+
+
+def get_generation_settings() -> GenerationSettings:
+    """Return validated generation controls without making an LLM request."""
+
+    return GenerationSettings(
+        temperature=_configured_temperature(),
+        max_tokens=_configured_max_tokens(),
+        num_ctx=_configured_num_ctx(),
+        think=ollama_thinking_enabled(),
+        keep_alive=_configured_keep_alive(),
     )
 
 
@@ -92,7 +129,7 @@ def get_llm_settings() -> tuple[str, str]:
     settings = get_provider_settings()
     if settings.provider != "ollama":
         raise OllamaConfigurationError(
-            "Ollama settings were requested while LLM_PROVIDER is 'azure'."
+            "Ollama settings were requested while LLM_PROVIDER is 'openrouter'."
         )
     return settings.model, settings.base_url
 
@@ -139,34 +176,53 @@ def _ollama_settings() -> LLMSettings:
     return LLMSettings(provider="ollama", model=model, base_url=base_url)
 
 
-def _azure_settings() -> LLMSettings:
-    model = _required_env("AZURE_LLM_MODEL", AzureConfigurationError)
-    if not model.startswith("azure/") or model == "azure/":
-        raise AzureConfigurationError(
-            "AZURE_LLM_MODEL must use the azure/ prefix, for example azure/my-deployment."
-        )
+def _openrouter_settings() -> LLMSettings:
+    """Read OpenRouter settings only when explicitly selected by LLM_PROVIDER."""
 
-    endpoint = _required_env("AZURE_ENDPOINT", AzureConfigurationError)
+    model = os.getenv("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL).strip()
+    if not model:
+        raise OpenRouterConfigurationError("OPENROUTER_MODEL must not be empty.")
+    _reject_placeholder(model, "OPENROUTER_MODEL", OpenRouterConfigurationError)
+
+    raw_base_url = os.getenv("OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL)
     try:
-        endpoint = normalize_base_url(endpoint, "AZURE_ENDPOINT")
+        base_url = normalize_base_url(raw_base_url, "OPENROUTER_BASE_URL")
     except LLMConfigurationError as exc:
-        raise AzureConfigurationError(str(exc)) from exc
-    api_key = _required_env("AZURE_API_KEY", AzureConfigurationError)
-    api_version = os.getenv("AZURE_API_VERSION", "").strip() or None
+        raise OpenRouterConfigurationError(str(exc)) from exc
+    if "localhost" in base_url.lower() or "127.0.0.1" in base_url:
+        raise OpenRouterConfigurationError(
+            "OPENROUTER_BASE_URL must point to the OpenRouter API, not localhost."
+        )
+    api_key = _required_env("OPENROUTER_API_KEY", OpenRouterConfigurationError, "openrouter")
+    _reject_placeholder(api_key, "OPENROUTER_API_KEY", OpenRouterConfigurationError)
     return LLMSettings(
-        provider="azure",
+        provider="openrouter",
         model=model,
-        base_url=endpoint,
+        base_url=base_url,
         api_key=api_key,
-        api_version=api_version,
     )
 
 
-def _required_env(name: str, error_type: type[LLMConfigurationError]) -> str:
+def _required_env(
+    name: str,
+    error_type: type[LLMConfigurationError],
+    provider: str,
+) -> str:
     value = os.getenv(name, "").strip()
     if not value:
-        raise error_type(f"{name} is required when LLM_PROVIDER=azure.")
+        raise error_type(f"{name} is required when LLM_PROVIDER={provider}.")
     return value
+
+
+def _reject_placeholder(
+    value: str,
+    variable_name: str,
+    error_type: type[LLMConfigurationError],
+) -> None:
+    """Reject example placeholders before a request reaches a cloud provider."""
+
+    if "<" in value or ">" in value:
+        raise error_type(f"{variable_name} must be replaced with a real value.")
 
 
 def ollama_thinking_enabled() -> bool:
@@ -188,8 +244,26 @@ def _configured_max_tokens() -> int:
         value = int(raw_value)
     except ValueError as exc:
         raise LLMConfigurationError("LLM_MAX_TOKENS must be a positive integer.") from exc
-    if not 256 <= value <= 2000:
-        raise LLMConfigurationError("LLM_MAX_TOKENS must be between 256 and 2000.")
+    if not 64 <= value <= 2000:
+        raise LLMConfigurationError("LLM_MAX_TOKENS must be between 64 and 2000.")
+    return value
+
+
+def _configured_num_ctx() -> int:
+    raw_value = os.getenv("LLM_NUM_CTX", str(DEFAULT_LLM_NUM_CTX)).strip()
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise LLMConfigurationError("LLM_NUM_CTX must be a positive integer.") from exc
+    if not 512 <= value <= 32768:
+        raise LLMConfigurationError("LLM_NUM_CTX must be between 512 and 32768.")
+    return value
+
+
+def _configured_keep_alive() -> str:
+    value = os.getenv("OLLAMA_KEEP_ALIVE", DEFAULT_OLLAMA_KEEP_ALIVE).strip()
+    if not value:
+        raise LLMConfigurationError("OLLAMA_KEEP_ALIVE must not be empty.")
     return value
 
 
