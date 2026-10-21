@@ -42,9 +42,10 @@ class _StageProgress:
         if next_stage == self.current_stage:
             return
         elapsed = max(0.0, elapsed_seconds)
-        self.status.write(f"{self.current_stage}: {elapsed:.1f}s")
+        if self.status is not None:
+            self.status.write(f"{self.current_stage}: {elapsed:.1f}s")
         self.current_stage = next_stage
-        if next_stage != "Completed":
+        if next_stage != "Completed" and self.status is not None:
             self.status.update(label=next_stage, state="running")
         if next_stage == "Writing answer":
             self.writing_started_at = perf_counter()
@@ -54,20 +55,22 @@ class _StageProgress:
 
         if self.current_stage != "Completed":
             self.advance("Completed", 0.0)
-        self.status.update(
-            label=f"Completed ({max(0.0, total_elapsed_seconds):.1f}s)",
-            state="complete",
-        )
+        if self.status is not None:
+            self.status.update(
+                label=f"Completed ({max(0.0, total_elapsed_seconds):.1f}s)",
+                state="complete",
+            )
 
     def fail(self, label: str) -> None:
         """Mark the public status as failed without rendering internal details."""
 
-        self.status.update(label=label, state="error")
+        if self.status is not None:
+            self.status.update(label=label, state="error")
 
     def update_writing_elapsed(self) -> None:
         """Keep the public writing timer moving as streamed answer tokens arrive."""
 
-        if self.current_stage == "Writing answer" and self.writing_started_at is not None:
+        if self.status is not None and self.current_stage == "Writing answer" and self.writing_started_at is not None:
             elapsed = perf_counter() - self.writing_started_at
             self.status.update(label=f"Writing answer ({elapsed:.1f}s)", state="running")
 
@@ -146,9 +149,7 @@ def main() -> None:
         if not question.strip():
             st.error("Please enter a question before analyzing documents.")
         else:
-            status = st.status(INITIAL_STAGE, expanded=True)
-            progress = _StageProgress(status)
-            st.caption("Fast workflow: retrieval → citation metadata checks → one LLM answer request (or cached answer).")
+            progress = _StageProgress(None)
             roles = ("Document Researcher", "Fact Checker", "Report Writer")
             panels = {}
             for number, role in enumerate(roles, 1):
