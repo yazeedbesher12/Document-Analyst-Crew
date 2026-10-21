@@ -148,7 +148,27 @@ def main() -> None:
         else:
             status = st.status(INITIAL_STAGE, expanded=True)
             progress = _StageProgress(status)
+            st.caption("Fast workflow: retrieval → citation metadata checks → one LLM answer request (or cached answer).")
+            roles = ("Document Researcher", "Fact Checker", "Report Writer")
+            panels = {}
+            for number, role in enumerate(roles, 1):
+                panels[role] = st.status(f"{number}. {role} — Waiting", expanded=True)
+            st.subheader("Final answer")
             streamed_answer = _StreamingAnswer(st.empty(), progress)
+            active_role = None
+
+            def show_agent(role: str, state: str, output: str) -> None:
+                nonlocal active_role
+                panel = panels[role]
+                number = roles.index(role) + 1
+                if state == "running":
+                    active_role = role
+                    panel.update(label=f"{number}. {role} — Working", state="running")
+                else:
+                    if output:
+                        panel.write(output)
+                    panel.update(label=f"{number}. {role} — Complete", state="complete")
+                    active_role = None
 
             def show_stage(stage: str, elapsed_seconds: float) -> None:
                 progress.advance(stage, elapsed_seconds)
@@ -167,42 +187,61 @@ def main() -> None:
                     retrieval_service=retrieval_service,
                     progress_callback=show_stage,
                     token_callback=streamed_answer.push,
+                    agent_callback=show_agent,
                 )
             except QuestionValidationError as exc:
                 LOGGER.exception("Streamlit received an invalid question.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except OllamaConnectionError as exc:
                 LOGGER.exception("Streamlit Ollama connection failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except OllamaModelMissingError as exc:
                 LOGGER.exception("Streamlit Ollama model preflight failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except ProviderConfigurationError as exc:
                 LOGGER.exception("Streamlit LLM provider configuration failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except RetrievalError as exc:
                 LOGGER.exception("Streamlit retrieval failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except CrewExecutionError as exc:
                 LOGGER.exception("Streamlit CrewAI execution failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except UnexpectedExecutionError as exc:
                 LOGGER.exception("Streamlit unexpected execution failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except QuestionExecutionError as exc:
                 LOGGER.exception("Streamlit document analysis failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error(str(exc))
             except Exception:
                 LOGGER.exception("Unexpected Streamlit application failure.")
                 progress.fail("Document analysis failed")
+                if active_role:
+                    panels[active_role].update(label=f"{active_role} — Failed", state="error")
                 st.error("An unexpected error occurred. Please try again.")
             else:
                 progress.complete(result.timings.get("total_request_execution", 0.0))

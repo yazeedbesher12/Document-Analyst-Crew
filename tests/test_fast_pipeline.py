@@ -230,3 +230,29 @@ def test_fast_mode_never_constructs_a_crewai_tool_loop(monkeypatch, tmp_path):
     assert result.pipeline_mode == "fast"
     assert result.llm_calls == 1
     assert len(generator.calls) == 1
+
+
+def test_fast_stage_outputs_follow_real_work_and_cache_does_not_fake_agents(tmp_path):
+    service, generator = FakeRetrievalService(), RecordingGenerator()
+    llm, generation = _settings()
+    events = []
+    kwargs = dict(
+        question="What is the remote work policy?", service=service,
+        llm_settings=llm, generation_settings=generation, generate=generator,
+        cache=ExactAnswerCache(tmp_path), mode="fast",
+        agent_callback=lambda *event: events.append(event),
+    )
+    result = run_fast_pipeline(**kwargs)
+    assert result.llm_calls == 1
+    assert [(role, state) for role, state, _ in events] == [
+        ("Document Researcher", "running"), ("Document Researcher", "complete"),
+        ("Fact Checker", "running"), ("Fact Checker", "complete"),
+        ("Report Writer", "running"), ("Report Writer", "complete"),
+    ]
+    assert _chunk().text in events[1][2]
+    assert "not an independent semantic fact check" in events[3][2]
+    events.clear()
+    cached = run_fast_pipeline(**kwargs)
+    assert cached.llm_calls == 0
+    assert len(generator.calls) == 1
+    assert all(state == "complete" and "cache" in output for _, state, output in events)

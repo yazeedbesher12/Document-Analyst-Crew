@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 from uuid import uuid4
@@ -81,6 +81,7 @@ class QuestionExecutionResult:
     retrieval_calls: int
     pipeline_mode: str
     metrics: dict[str, object]
+    agent_outputs: dict[str, str] = field(default_factory=dict)
 
 
 def validate_question(question: str) -> str:
@@ -116,6 +117,7 @@ def execute_question(
     answer_cache: ExactAnswerCache | None = None,
     mode: str | None = None,
     token_callback: Callable[[str], None] | None = None,
+    agent_callback: Callable[[str, str, str], None] | None = None,
 ) -> QuestionExecutionResult:
     """Run one fresh fast, strict, or legacy execution without leaking internals."""
 
@@ -140,6 +142,13 @@ def execute_question(
         initialization_elapsed,
     )
     retrieval_calls_before, retrieval_seconds_before = retrieval_service.metrics_snapshot()
+    agent_outputs: dict[str, str] = {}
+
+    def record_agent(role: str, state: str, output: str) -> None:
+        if state == "complete":
+            agent_outputs[role] = output
+        if agent_callback is not None:
+            agent_callback(role, state, output)
 
     try:
         if selected_mode == "legacy":
@@ -149,6 +158,7 @@ def execute_question(
                 crew_factory,
                 timing,
                 progress_callback,
+                record_agent,
             )
         else:
             timing.begin("retrieval_execution")
@@ -174,6 +184,7 @@ def execute_question(
                 mode=selected_mode,
                 cache=answer_cache,
                 progress_callback=fast_progress,
+                agent_callback=record_agent,
             )
             timing.finish("retrieval_execution")
             timing.finish("citation_verification")
@@ -227,6 +238,7 @@ def execute_question(
         retrieval_calls=retrieval_calls_after - retrieval_calls_before,
         pipeline_mode=selected_mode,
         metrics=metrics,
+        agent_outputs=agent_outputs,
     )
 
 
@@ -236,13 +248,16 @@ def _execute_legacy(
     crew_factory: Callable[..., Any],
     timing: RequestTiming,
     progress_callback: Callable[[str, float], None] | None,
+    agent_callback: Callable[[str, str, str], None] | None = None,
 ) -> tuple[str, int | None, dict[str, object]]:
     """Run the retained multi-agent CrewAI workflow only when explicitly selected."""
 
     bundle = crew_factory(output_path=output_path)
-    _attach_task_timing(bundle, timing, progress_callback)
+    _attach_task_timing(bundle, timing, progress_callback, agent_callback)
     timing.begin("researcher_execution")
     timing.begin("total_crew_execution")
+    if agent_callback is not None:
+        agent_callback("Document Researcher", "running", "")
     kickoff_result = bundle.crew.kickoff(inputs={"question": question})
     timing.finish("researcher_execution")
     timing.finish("fact_checker_execution")
@@ -404,6 +419,7 @@ def _attach_task_timing(
     bundle: Any,
     timing: RequestTiming,
     progress_callback: Callable[[str, float], None] | None,
+    agent_callback: Callable[[str, str, str], None] | None = None,
 ) -> None:
     """Attach content-free task completion callbacks to a newly created Crew only."""
 
@@ -411,18 +427,30 @@ def _attach_task_timing(
     if tasks is None:
         return
 
+    def completed(role: str, output: Any, next_role: str | None = None) -> None:
+        if agent_callback is None:
+            return
+        # TaskOutput.raw is the task's public deliverable, not prompts or reasoning.
+        raw = getattr(output, "raw", "")
+        agent_callback(role, "complete", raw if isinstance(raw, str) else "")
+        if next_role is not None:
+            agent_callback(next_role, "running", "")
+
     def researcher_complete(_output: Any) -> None:
         elapsed = timing.finish("researcher_execution")
+        completed("Document Researcher", _output, "Fact Checker")
         _notify_progress(progress_callback, "Verifying claims", elapsed)
         timing.begin("fact_checker_execution")
 
     def fact_checker_complete(_output: Any) -> None:
         elapsed = timing.finish("fact_checker_execution")
+        completed("Fact Checker", _output, "Report Writer")
         _notify_progress(progress_callback, "Writing report", elapsed)
         timing.begin("report_writer_execution")
 
     def report_writer_complete(_output: Any) -> None:
         timing.finish("report_writer_execution")
+        completed("Report Writer", _output)
 
     tasks.research_task.callback = researcher_complete
     tasks.fact_check_task.callback = fact_checker_complete

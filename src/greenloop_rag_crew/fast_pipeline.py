@@ -180,6 +180,7 @@ def run_fast_pipeline(
     mode: str | None = None,
     cache: ExactAnswerCache | None = None,
     progress_callback: Callable[[str, float], None] | None = None,
+    agent_callback: Callable[[str, str, str], None] | None = None,
 ) -> FastPipelineResult:
     """Run deterministic evidence work and one, or strict-mode two, generations."""
 
@@ -191,6 +192,10 @@ def run_fast_pipeline(
             "STRICT_LLM_VERIFICATION=true is required when RAG_PIPELINE_MODE=strict."
         )
 
+    def notify(role: str, state: str, output: str = "") -> None:
+        if agent_callback is not None:
+            agent_callback(role, state, output)
+
     cache_key = _cache_key(question, llm_settings, generation_settings, selected_mode)
     cache = cache or ExactAnswerCache()
     if answer_cache_enabled():
@@ -199,6 +204,9 @@ def run_fast_pipeline(
             _notify_progress(progress_callback, "Retrieving evidence", 0.0)
             _notify_progress(progress_callback, "Verifying citation metadata", 0.0)
             _notify_progress(progress_callback, "Writing answer", 0.0)
+            for role in ("Document Researcher", "Fact Checker"):
+                notify(role, "complete", "Exact answer cache hit; this stage was not rerun.")
+            notify("Report Writer", "complete", "Loaded the previously generated report from cache.")
             empty_context = RetrievalContext((), "", (), 0.0)
             verification = VerificationResult(frozenset(), ("Exact answer cache hit.",))
             return FastPipelineResult(
@@ -210,10 +218,23 @@ def run_fast_pipeline(
                 answer_cache_hit=True,
             )
 
+    notify("Document Researcher", "running")
     retrieval = retrieve_evidence(question, service)
+    evidence = "\n\n".join(
+        f"**{chunk.title} — page {chunk.page}** (`{chunk.chunk_id}`)\n\n{chunk.text}"
+        for chunk in retrieval.chunks
+    )
+    notify("Document Researcher", "complete", evidence or "No matching evidence found.")
+    notify("Fact Checker", "running")
     _notify_progress(progress_callback, "Verifying citation metadata", retrieval.duration_seconds)
     verification_started = perf_counter()
     verification = verify_retrieval_context(retrieval)
+    checks = f"Checked citation metadata for {len(verification.allowed_chunk_ids)} evidence chunks."
+    checks += "\n\n" + ("\n".join(f"- {warning}" for warning in verification.warnings)
+                                or "No citation metadata warnings found.")
+    checks += "\n\nThis is a deterministic metadata check, not an independent semantic fact check."
+    notify("Fact Checker", "complete", checks)
+    notify("Report Writer", "running")
     _notify_progress(
         progress_callback,
         "Writing answer",
@@ -231,6 +252,7 @@ def run_fast_pipeline(
     report, report_warnings = render_report(final_content, verification, retrieval)
     all_warnings = tuple(dict.fromkeys((*verification.warnings, *report_warnings)))
     final_verification = VerificationResult(verification.allowed_chunk_ids, all_warnings)
+    notify("Report Writer", "complete", "Report generated. See Final answer below.")
     if answer_cache_enabled():
         cache.put(cache_key, report)
     return FastPipelineResult(
