@@ -151,24 +151,40 @@ def main() -> None:
         else:
             progress = _StageProgress(None)
             roles = ("Document Researcher", "Fact Checker", "Report Writer")
+            slots = {role: st.empty() for role in roles}
             panels = {}
-            for number, role in enumerate(roles, 1):
-                panels[role] = st.status(f"{number}. {role} — Waiting", expanded=True)
-            st.subheader("Final answer")
+            summaries = {
+                roles[0]: "Research complete: retrieved the evidence shown below.",
+                roles[1]: "Citation checks complete: checked the retrieved reference metadata.",
+                roles[2]: "Writing complete: the final answer is ready below.",
+            }
+            final_heading = st.empty()
             streamed_answer = _StreamingAnswer(st.empty(), progress)
+
+            def show_token(token: str) -> None:
+                final_heading.subheader("Final answer")
+                streamed_answer.push(token)
             active_role = None
 
             def show_agent(role: str, state: str, output: str) -> None:
                 nonlocal active_role
-                panel = panels[role]
                 number = roles.index(role) + 1
+                if role not in panels:
+                    panels[role] = slots[role].status(
+                        f"{number}. {role} — Working", expanded=True
+                    )
+                panel = panels[role]
                 if state == "running":
                     active_role = role
                     panel.update(label=f"{number}. {role} — Working", state="running")
                 else:
-                    if output:
+                    if "cache" in output.lower():
                         panel.write(output)
-                    panel.update(label=f"{number}. {role} — Complete", state="complete")
+                    else:
+                        panel.write(summaries[role])
+                        if output:
+                            panel.write(output)
+                    panel.update(label=f"{number}. {role} — Completed", state="complete")
                     active_role = None
 
             def show_stage(stage: str, elapsed_seconds: float) -> None:
@@ -187,7 +203,7 @@ def main() -> None:
                     question,
                     retrieval_service=retrieval_service,
                     progress_callback=show_stage,
-                    token_callback=streamed_answer.push,
+                    token_callback=show_token,
                     agent_callback=show_agent,
                 )
             except QuestionValidationError as exc:
@@ -246,6 +262,7 @@ def main() -> None:
                 st.error("An unexpected error occurred. Please try again.")
             else:
                 progress.complete(result.timings.get("total_request_execution", 0.0))
+                final_heading.subheader("Final answer")
                 streamed_answer.replace_with_complete(result.report_markdown)
                 st.session_state["streamed_answer"] = result.report_markdown
                 st.caption(_generation_metrics_text(result.metrics, result.llm_calls))
